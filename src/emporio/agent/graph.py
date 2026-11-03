@@ -31,6 +31,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from emporio.agent.prompts import build_system_prompt
+from emporio.agent.verification import ungrounded_protocols
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings
 from emporio.handoff import HandoffStore
@@ -48,6 +49,10 @@ RECURSION_LIMIT = 16  # ~7 rodadas de ferramenta por mensagem do cliente
 FALLBACK_ERROR = (
     "Poxa, tive um problema técnico aqui e não consegui concluir sua solicitação. 😕 "
     f"Pode tentar de novo em instantes? Se preferir, fale com a equipe pelo {STORE_INFO['phone_whatsapp']}."
+)
+FALLBACK_UNGROUNDED_TICKET = (
+    "Desculpa, não consegui registrar o seu atendimento agora. Para garantir que a equipe veja o "
+    f"seu caso, fale com a gente pelo WhatsApp {STORE_INFO['phone_whatsapp']}."
 )
 FALLBACK_LOOP = (
     "Desculpa, não consegui chegar a uma resposta segura para isso. Vou deixar com a equipe: "
@@ -90,6 +95,22 @@ def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, check
         history = recent_history(state["messages"])
         response = bound.invoke([system, *history])
 
+        # Verificação: protocolos citados precisam ter sido emitidos por escalate_to_human.
+        if not response.tool_calls:
+            invented = ungrounded_protocols(message_text(response), state["messages"])
+            if invented:
+                logger.warning("Protocolo inventado pelo modelo: %s; pedindo correção.", invented)
+                correction = HumanMessage(
+                    "[Verificação automática interna, não é mensagem do cliente] Sua resposta cita "
+                    f"protocolo(s) {sorted(invented)} que não foram emitidos por escalate_to_human. "
+                    "Se for registrar o caso, chame escalate_to_human agora; caso contrário, "
+                    "responda sem citar protocolo."
+                )
+                # A correção não é salva no histórico: só vale para esta nova tentativa.
+                response = bound.invoke([system, *history, response, correction])
+                if not response.tool_calls and ungrounded_protocols(message_text(response), state["messages"]):
+                    logger.error("Modelo insistiu em protocolo inventado; usando resposta segura.")
+                    response = AIMessage(FALLBACK_UNGROUNDED_TICKET)
         return {"messages": [response]}
 
     graph = StateGraph(MessagesState)
