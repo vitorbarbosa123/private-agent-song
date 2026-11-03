@@ -219,6 +219,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pypdf" },
     { name = "rapidfuzz" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -233,6 +234,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.16.2" },
     { name = "pypdf", specifier = ">=5.0" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
+    { name = "tzdata", specifier = ">=2026.6" },
 ]
 
 [package.metadata.requires-dev]
