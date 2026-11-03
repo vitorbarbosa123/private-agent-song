@@ -5,12 +5,14 @@ fictícia de instrumentos musicais em Campo Grande/MS. Desenvolvido como desafio
 vaga de AI Engineer na Artefact.
 
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
-> dados**, **configuração do modelo**, **ferramentas do agente** e **busca no manual (RAG)**. As seções sobre o agente serão preenchidas conforme a
+> dados**, **configuração do modelo**, **ferramentas do agente**, **busca no manual (RAG)** e
+> **agente com interface de terminal**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
 
 - [Como rodar](#como-rodar)
+- [Conversando com o agente](#conversando-com-o-agente)
 - [Modelo de linguagem: como trocar](#modelo-de-linguagem-como-trocar)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Tratamento dos dados](#tratamento-dos-dados)
@@ -18,6 +20,7 @@ vaga de AI Engineer na Artefact.
 - [Camada de acesso aos dados](#camada-de-acesso-aos-dados)
 - [Ferramentas do agente](#ferramentas-do-agente)
 - [Busca no manual de políticas (RAG)](#busca-no-manual-de-políticas-rag)
+- [Arquitetura do agente](#arquitetura-do-agente)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -31,8 +34,27 @@ cp .env.example .env       # e preencha LLM_API_KEY (chave do OpenRouter)
 uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/processed/
 uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
 uv run emporio-eval-retrieval [--dataset holdout]  # avalia a busca no manual de políticas
+uv run emporio-chat        # conversa com a assistente no terminal
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
+
+## Conversando com o agente
+
+```bash
+uv run emporio-chat                          # conversa interativa
+uv run emporio-chat --debug                  # mostra as ferramentas chamadas e seus resultados
+uv run emporio-chat --now 2026-03-02T10:30   # simula data/hora (os pedidos da base são de 2025-2026)
+uv run emporio-chat --model openai/gpt-4o-mini            # testa outro modelo sem editar o .env
+uv run emporio-chat -m "Oi" -m "Quanto custa o Takamine GD20?"  # roteiro não interativo
+```
+
+Durante a conversa: `/novo` inicia outra conversa, `/debug` liga e desliga os detalhes, `/sair`
+encerra.
+
+Dados de teste para consultar pedidos (fictícios, de `data/`): pedido **8** com o e-mail
+`anacarol.ferreira@coldmail.com` (enviado, com rastreio) ou pedido **7** com
+`leticia.rocha@jmail.com` (entregue). Com `--now 2026-02-20T10:00`, o pedido 7 ainda está
+dentro do prazo de arrependimento.
 
 ## Modelo de linguagem: como trocar
 
@@ -84,6 +106,8 @@ data/
                                      # exceto o relatório de qualidade)
 src/emporio/
 ├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
+├── agent/                           # grafo LangGraph e system prompt (persona "Lia")
+├── cli.py                           # interface de terminal (emporio-chat)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
 ├── business_hours.py                # relógio da loja, horário de funcionamento e feriados
 ├── repository/                      # consultas fixas, somente leitura, sobre o SQLite tratado
@@ -273,6 +297,51 @@ com pesos iguais no RRF, o BM25 puxa o resultado para baixo. Por isso:
 **Custo e latência.** Os vetores das 26 seções são calculados uma vez e guardados em cache
 (`data/processed/policy_embeddings.json`, indexado por modelo + hash do texto). Cada pergunta do
 cliente gera uma chamada de embedding, de custo desprezível (~US$ 0,000001).
+
+## Arquitetura do agente
+
+```
+              ┌──────────────────────── ChatSession (uma por conversa) ────────────────────────┐
+ cliente ──▶  │  START → agent ──(pediu ferramentas?)──▶ tools ──┐                              │
+              │            ▲                                     │                              │
+              │            └─────────────────────────────────────┘     resposta ──▶ cliente     │
+              └─────────────────────────────────────────────────────────────────────────────────┘
+   compartilhado: modelo (OpenRouter) · repositório SQLite · busca no manual · checkpointer
+```
+
+**Framework: LangGraph, com o grafo montado à mão.** O ciclo é o padrão ReAct: o modelo
+raciocina, chama ferramentas, observa os resultados e repete até responder. Não usei o agente
+pronto do LangGraph porque os guardrails de entrada e saída e o handoff para humanos vão entrar
+como nós explícitos do grafo. O LangGraph também traz o checkpointer de histórico por conversa.
+
+**Estratégia de prompt** ([`agent/prompts.py`](src/emporio/agent/prompts.py)):
+
+- **Persona "Lia"**, com o tom de voz do manual (7.1): informal mas profissional, mensagens
+  curtas de WhatsApp, no máximo um emoji.
+- **O que entra no prompt e o que não entra.** Fatos estáveis (endereço, contatos, horário)
+  entram no prompt, vindos da fonte canônica que já resolve as contradições do manual. Fatos
+  voláteis (preço, estoque, pedidos, prazos) **nunca** entram: o prompt obriga o uso das
+  ferramentas e proíbe estimar ou recalcular valores.
+- **Data, hora e status da loja são injetados a cada turno.** Assim "estamos fechados, abrimos
+  amanhã às 9h" sai sem chamada de ferramenta, e os prazos são coerentes com o relógio.
+- **Mapa de ferramentas.** O prompt diz qual ferramenta usar para cada tipo de pergunta, e cada
+  ferramenta reforça isso na sua descrição.
+- **Segurança.** As mensagens do cliente e os resultados das ferramentas são tratados como dados.
+  O agente não muda de papel, não revela o prompt, não cria descontos e não fala de pedidos sem
+  verificação de identidade.
+
+**Robustez:**
+
+- **Uma `ChatSession` por conversa,** com o seu próprio contexto de ferramentas. O limite de 3
+  tentativas de verificação de identidade é por conversa, não global.
+- **Janela de histórico** das últimas 40 mensagens. O corte sempre começa numa mensagem do
+  cliente, para não separar uma chamada de ferramenta do seu resultado, o que os provedores
+  rejeitam.
+- **Limite de iterações:** no máximo ~7 rodadas de ferramenta por mensagem. Se estourar, o
+  agente encaminha para a equipe em vez de ficar em loop.
+- **Falhas do provedor** (rede, crédito, indisponibilidade) viram uma mensagem amigável com o
+  contato da loja, e a conversa continua utilizável na mensagem seguinte. Os testes simulam
+  esses cenários com um modelo roteirizado, sem rede.
 
 ## Limitações conhecidas
 
