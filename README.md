@@ -5,7 +5,7 @@ fictícia de instrumentos musicais em Campo Grande/MS. Desenvolvido como desafio
 vaga de AI Engineer na Artefact.
 
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
-> dados**, **configuração do modelo** e **ferramentas do agente**. As seções sobre o agente serão preenchidas conforme a
+> dados**, **configuração do modelo**, **ferramentas do agente** e **busca no manual (RAG)**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
@@ -17,6 +17,7 @@ vaga de AI Engineer na Artefact.
 - [Interpretações do manual de políticas](#interpretações-do-manual-de-políticas)
 - [Camada de acesso aos dados](#camada-de-acesso-aos-dados)
 - [Ferramentas do agente](#ferramentas-do-agente)
+- [Busca no manual de políticas (RAG)](#busca-no-manual-de-políticas-rag)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -29,6 +30,7 @@ uv sync                    # cria o ambiente virtual e instala as dependências
 cp .env.example .env       # e preencha LLM_API_KEY (chave do OpenRouter)
 uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/processed/
 uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
+uv run emporio-eval-retrieval [--dataset holdout]  # avalia a busca no manual de políticas
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
 
@@ -55,6 +57,8 @@ LLM_MODEL=@preset/emporio-agent         # volta ao preset padrão
 | `LLM_BASE_URL` | Qualquer API compatível com a da OpenAI: OpenAI direto, Ollama local etc. | OpenRouter |
 | `LLM_MAX_TOKENS` | Limite de tokens da resposta. Sem ele, o OpenRouter reserva crédito para o máximo do modelo e pode recusar a chamada em chaves com limite de gasto | `1024` |
 | `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | Ajustes finos | `0.2`, `60`, `2` |
+| `EMBEDDING_MODEL` | Modelo de embeddings da busca no manual (mesma chave e endpoint). Vazio = só BM25, sem rede | `google/gemini-embedding-001` |
+| `RETRIEVAL_MODE` | `embeddings`, `hybrid` ou `bm25` | `embeddings` |
 | `EMPORIO_NOW` | Fixa a data e hora vistas pelo agente (ex.: `2026-03-02T10:30`), para demonstrações reproduzíveis | relógio real |
 
 Exemplo com modelo local, sem chave: `LLM_BASE_URL=http://localhost:11434/v1` e
@@ -84,6 +88,7 @@ src/emporio/
 ├── business_hours.py                # relógio da loja, horário de funcionamento e feriados
 ├── repository/                      # consultas fixas, somente leitura, sobre o SQLite tratado
 ├── tools/                           # ferramentas do agente (funções puras + registro LangChain)
+├── rag/                             # busca no manual: BM25, embeddings, avaliação
 └── data/
     ├── pipeline.py                  # orquestração, escrita dos artefatos e relatório
     ├── products.py                  # catálogo: specs, descrições, disponibilidade
@@ -91,6 +96,7 @@ src/emporio/
     ├── categories.py · customers.py · orders.py
     ├── policies.py                  # extração do PDF e divisão em seções
     └── issues.py · utils.py · paths.py
+evals/                               # perguntas de avaliação da busca (dev e holdout)
 tests/
 ```
 
@@ -192,6 +198,7 @@ todas são testadas sem LLM. O [registro](src/emporio/tools/registry.py) as exp�
 | `check_return_eligibility` | "Me arrependi, posso devolver?" | Calcula prazos (7 dias de arrependimento, 30 de troca por defeito, 90 de garantia legal) e diz qual data usou |
 | `payment_options` | "Em quantas vezes posso pagar?" | Faixas de parcela mínima; PIX só nos itens sem promoção; combinação de pagamentos acima de R$ 2.000 |
 | `shipping_quote` | "Entregam em Dourados?" | Valor só quando é calculável (Campo Grande); avisa sobre frete especial para itens grandes |
+| `search_policies` | "Qual o prazo para devolução?" | Trechos do manual com o número da seção, mais a interpretação oficial quando o trecho é ambíguo (ver abaixo) |
 | `store_status` | "Vocês estão abertos?" | Horário no fuso de Campo Grande, feriados (inclusive móveis) e próxima abertura |
 
 Decisões de desenho:
@@ -202,12 +209,70 @@ Decisões de desenho:
 - **Notas para o modelo.** Cada resultado traz `notes` com a orientação de política aplicável,
   como "não acumula com PIX", "não diga se o pedido existe" ou "ofereça alternativas". A regra
   chega no momento em que é relevante, em vez de depender só do system prompt.
-- **Erros viram mensagens.** Parâmetros inválidos ou falhas retornam texto para o modelo se
-  corrigir, em vez de derrubar a conversa.
+- **Erros viram mensagens.** Parâmetros inválidos ou falhas internas retornam texto para o
+  modelo se corrigir, em vez de derrubar a conversa. Todo erro é convertido em `ToolException`,
+  porque o LangChain só trata esse tipo e deixaria os demais propagarem.
 - **Relógio injetável** (`EMPORIO_NOW`). Os pedidos da base são de 2025–2026; fixar a data torna
   demonstrações e testes de prazos reproduzíveis.
 - **Feriados.** São considerados os nacionais (inclusive a Sexta-feira Santa, calculada a partir
   da Páscoa), o estadual de MS (11/10) e o municipal de Campo Grande (26/08).
+
+## Busca no manual de políticas (RAG)
+
+Implementada em [`src/emporio/rag/`](src/emporio/rag/) e exposta ao agente pela ferramenta
+`search_policies`.
+
+**Chunking.** Cada seção numerada do manual vira um chunk, e o título da seção-mãe é incorporado
+("Política de Frete e Entregas › 5.1. Entregas na Região Metropolitana…"). As seções têm no máximo
+~800 caracteres e tratam de um único assunto, então o corte natural do documento é melhor que
+janelas de tamanho fixo. Isso também permite citar a seção na resposta. São 26 chunks; seções que
+têm só título são omitidas.
+
+**Interpretações oficiais junto dos trechos.** Quando a seção mais relevante tem uma contradição
+resolvida em `policy_rules.RESOLUTIONS`, a ferramenta devolve a decisão junto com o texto. Exemplo:
+a seção 7 cita o WhatsApp (67) 3321-4500, e a resposta acrescenta "número canônico:
+(67) 3341-4444". Assim o modelo não repete uma contradição do manual.
+
+**Avaliação e escolha da estratégia.** Montei dois conjuntos de perguntas de clientes, cada uma com
+as seções esperadas:
+
+- [`evals/policy_retrieval.json`](evals/policy_retrieval.json) (**dev**, 28 perguntas): usado
+  para ajustar a busca.
+- [`evals/policy_retrieval_holdout.json`](evals/policy_retrieval_holdout.json) (**holdout**, 22
+  paráfrases novas): escrito antes de qualquer medição nele e nunca usado para ajustes.
+
+Comparação de modelos de embedding (dev, busca só por embeddings):
+
+| Modelo | hit@1 | hit@3 | MRR |
+|---|---:|---:|---:|
+| `openai/text-embedding-3-small` | 75% | 96% | 0,85 |
+| `openai/text-embedding-3-large` | 71% | 93% | 0,82 |
+| `qwen/qwen3-embedding-8b` | 61% | 93% | 0,77 |
+| **`google/gemini-embedding-001`** | **82%** | **96%** | **0,89** |
+
+Comparação de estratégias com `gemini-embedding-001`:
+
+| Modo | dev hit@1 | dev hit@3 | **holdout hit@1** | **holdout hit@3** | holdout MRR |
+|---|---:|---:|---:|---:|---:|
+| BM25 (+ stemming e sinônimos) | 86% | 100% | 73% | 82% | 0,77 |
+| **Embeddings** | 82% | 96% | **95%** | **100%** | **0,98** |
+| Híbrido (Reciprocal Rank Fusion) | 86% | 100% | 86% | 91% | 0,89 |
+
+**O que os números mostraram.** O BM25 parecia o melhor no dev, mas eu tinha ajustado os
+sinônimos dele olhando os erros desse mesmo conjunto. No holdout ele cai para 82% de hit@3: não
+generaliza para paráfrases novas ("até que horas ficam abertos?", "o captador parou de
+funcionar"). A minha hipótese inicial, de que o híbrido seria o melhor, também não se confirmou:
+com pesos iguais no RRF, o BM25 puxa o resultado para baixo. Por isso:
+
+- o **padrão é busca só por embeddings** (`RETRIEVAL_MODE=embeddings`);
+- o **BM25 é o fallback automático**: se a API de embeddings falhar, a busca degrada em vez de
+  falhar, e o agente é avisado;
+- o modo híbrido continua disponível por configuração, mas não calibrei os pesos do RRF no
+  holdout, para não contaminá-lo.
+
+**Custo e latência.** Os vetores das 26 seções são calculados uma vez e guardados em cache
+(`data/processed/policy_embeddings.json`, indexado por modelo + hash do texto). Cada pergunta do
+cliente gera uma chamada de embedding, de custo desprezível (~US$ 0,000001).
 
 ## Limitações conhecidas
 
@@ -221,6 +286,9 @@ Decisões de desenho:
   data informada pelo cliente ou essa previsão.
 - **Feriados municipais de outras cidades e pontos facultativos** (Carnaval, Corpus Christi) não
   são considerados no horário da loja.
+- **Conjuntos de avaliação pequenos** (28 + 22 perguntas, escritas por mim). Servem para comparar
+  estratégias e pegar regressões, mas as diferenças de poucos pontos percentuais não são
+  estatisticamente robustas. Com mais tempo, coletaria perguntas reais do WhatsApp da loja.
 - **Promoções sem datas.** Sem datas de vigência, `is_active` é a única fonte de verdade.
 - **Divergências não resolvidas na origem.** Telefone, status do produto 130 e totais dos pedidos
   3 e 20 precisariam ser confirmados com a loja. Com mais tempo, o relatório de qualidade viraria
