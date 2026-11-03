@@ -30,6 +30,7 @@ class PromotionView(BaseModel):
     name: str | None
     discount: str
     price: str
+    savings: str = Field(description="Economia em relação ao preço de tabela.")
 
 
 class PriceView(BaseModel):
@@ -40,6 +41,7 @@ class PriceView(BaseModel):
     pix_price: str | None = Field(
         default=None, description="Preço à vista no PIX (5% off). Ausente quando há promoção: não acumulam."
     )
+    pix_savings: str | None = Field(default=None, description="Economia pagando no PIX.")
     current_price_brl: float = Field(description="Preço vigente numérico, para outras ferramentas.")
 
 
@@ -71,6 +73,7 @@ def product_view(p: Product) -> ProductView:
             name=p.price.promotion_name,
             discount=percent(p.price.promotion_discount_percent),
             price=brl(p.price.promotion_price_brl),
+            savings=brl(p.price.list_price_brl - p.price.promotion_price_brl),
         )
     stock_note = None
     if p.is_sellable and p.stock_quantity <= LOW_STOCK:
@@ -87,6 +90,8 @@ def product_view(p: Product) -> ProductView:
             list_price=brl(p.price.list_price_brl),
             promotion=promo,
             pix_price=brl(p.price.pix_price_brl) if p.price.pix_price_brl is not None else None,
+            pix_savings=(brl(p.price.list_price_brl - p.price.pix_price_brl)
+                         if p.price.pix_price_brl is not None else None),
             current_price_brl=p.price.current_price_brl,
         ),
         description=p.description,
