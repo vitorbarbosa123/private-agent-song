@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
+from typing import Literal
 from pathlib import Path
 
 from pydantic import AliasChoices, Field, SecretStr
@@ -48,6 +49,16 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(default=1024, validation_alias="LLM_MAX_TOKENS")
     llm_timeout_seconds: float = Field(default=60.0, validation_alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=2, validation_alias="LLM_MAX_RETRIES")
+
+    # --- Busca no manual de políticas ----------------------------------------
+    # Modelo de embeddings (mesmo endpoint e chave do LLM). Vazio = só busca lexical (BM25).
+    # Padrões escolhidos pela avaliação (uv run emporio-eval-retrieval --dataset holdout):
+    # embeddings puros generalizaram melhor que BM25 e que o híbrido. BM25 é o fallback
+    # automático se a API de embeddings falhar.
+    embedding_model: str = Field(default="google/gemini-embedding-001", validation_alias="EMBEDDING_MODEL")
+    retrieval_mode: Literal["hybrid", "bm25", "embeddings"] = Field(
+        default="embeddings", validation_alias="RETRIEVAL_MODE"
+    )
 
     # --- Relógio -------------------------------------------------------------
     # Data/hora fixa para demonstrações e testes reproduzíveis (ex.: 2026-03-25T10:30).
