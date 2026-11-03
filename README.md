@@ -4,15 +4,18 @@ Protótipo de um agente de atendimento por mensagens de texto para a **Empório 
 fictícia de instrumentos musicais em Campo Grande/MS. Desenvolvido como desafio técnico para a
 vaga de AI Engineer na Artefact.
 
-> **Status:** em desenvolvimento. A primeira etapa, **tratamento dos dados**, está concluída e é
-> descrita abaixo. As seções sobre o agente serão preenchidas conforme a implementação avançar.
+> **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
+> dados** e **configuração do modelo**. As seções sobre o agente serão preenchidas conforme a
+> implementação avançar.
 
 ## Sumário
 
 - [Como rodar](#como-rodar)
+- [Modelo de linguagem: como trocar](#modelo-de-linguagem-como-trocar)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Tratamento dos dados](#tratamento-dos-dados)
 - [Interpretações do manual de políticas](#interpretações-do-manual-de-políticas)
+- [Camada de acesso aos dados](#camada-de-acesso-aos-dados)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -22,9 +25,46 @@ Pré-requisitos: Python 3.11+ e [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync                    # cria o ambiente virtual e instala as dependências
+cp .env.example .env       # e preencha LLM_API_KEY (chave do OpenRouter)
 uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/processed/
-uv run pytest              # roda os testes
+uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
+uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
+
+## Modelo de linguagem: como trocar
+
+O projeto acessa o modelo pelo **[OpenRouter](https://openrouter.ai)**, com uma única chave de API.
+O modelo padrão é um **preset** da plataforma (`@preset/emporio-agent`): modelo principal,
+fallbacks e parâmetros ficam configurados no painel do OpenRouter, sem mudança de código.
+
+**Para testar outro modelo, basta alterar uma variável no `.env`:**
+
+```bash
+LLM_MODEL=openai/gpt-4o-mini            # qualquer ID de https://openrouter.ai/models
+LLM_MODEL=anthropic/claude-sonnet-4.5
+LLM_MODEL=@preset/emporio-agent         # volta ao preset padrão
+```
+
+| Variável | Para quê | Padrão |
+|---|---|---|
+| `LLM_API_KEY` (ou `OPENROUTER_API_KEY`) | Chave de API | — |
+| `LLM_MODEL` | Modelo do agente | `@preset/emporio-agent` |
+| `LLM_FAST_MODEL` | Modelo barato para tarefas auxiliares (guardrails, avaliação) | usa `LLM_MODEL` |
+| `LLM_FALLBACK_MODELS` | Fallbacks na própria requisição, separados por vírgula (só OpenRouter) | nenhum |
+| `LLM_BASE_URL` | Qualquer API compatível com a da OpenAI: OpenAI direto, Ollama local etc. | OpenRouter |
+| `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | Ajustes finos | `0.2`, `60`, `2` |
+
+Exemplo com modelo local, sem chave: `LLM_BASE_URL=http://localhost:11434/v1` e
+`LLM_MODEL=llama3.1`. O comando `uv run emporio-llm-check` mostra a configuração ativa (com a
+chave mascarada) e qual modelo de fato atendeu a requisição, o que é útil para confirmar um
+fallback.
+
+**Por que OpenRouter.** Uma única chave e uma API compatível com a da OpenAI dão acesso a modelos
+de vários fornecedores. Isso permite trocar ou comparar modelos sem mexer em código e configurar
+fallbacks automáticos se um provedor cair. Como o cliente (`langchain-openai`) fala o protocolo
+da OpenAI, o mesmo código funciona com outros provedores compatíveis. Toda a configuração está em
+[`src/emporio/config.py`](src/emporio/config.py) e a criação do cliente em
+[`src/emporio/llm.py`](src/emporio/llm.py).
 
 ## Estrutura do projeto
 
@@ -34,7 +74,9 @@ data/
 └── processed/                       # artefatos gerados pelo pipeline (não versionados,
                                      # exceto o relatório de qualidade)
 src/emporio/
+├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
+├── repository/                      # consultas fixas, somente leitura, sobre o SQLite tratado
 └── data/
     ├── pipeline.py                  # orquestração, escrita dos artefatos e relatório
     ├── products.py                  # catálogo: specs, descrições, disponibilidade
@@ -109,11 +151,30 @@ pipeline, para validar pedidos, quanto pelo agente.
 | O direito de arrependimento vale para compras online, mas os pedidos não informam o canal | Todos os pedidos da base são tratados como online | Todos passam por fluxo de envio e entrega |
 | "Mais de 300 instrumentos" vs. 65 produtos na base | O agente responde só com o que está no sistema | Manual 7.1: nunca informar sem consultar o sistema |
 
+## Camada de acesso aos dados
+
+As ferramentas do agente vão consultar os dados por meio de
+[`StoreRepository`](src/emporio/repository/repository.py), que retorna modelos Pydantic
+tipados.
+
+| Decisão | Motivo |
+|---|---|
+| **Consultas fixas e parametrizadas, em vez de text-to-SQL.** O LLM escolhe a ferramenta e os filtros (categoria, faixa de preço, marca, tipo de corda, com eletrônica…), e o código monta a consulta com trechos fixos e parâmetros vinculados | Elimina SQL injection e consultas alucinadas, e protege dados de clientes. O custo é perder flexibilidade em perguntas analíticas, que fogem do escopo de um atendimento |
+| **Conexão somente leitura** (`mode=ro`) | O agente nunca altera dados |
+| **Busca textual tolerante**: normalização sem acentos, cobertura de palavras, plurais ("violão"/"violões"), hífens ("d28"/"D-28") e erros de digitação ("yamha") | Clientes não escrevem o nome exato do produto. Regras simples e testadas bastam para 65 produtos; embeddings seriam desproporcionais aqui |
+| **Busca por nome inclui produtos esgotados e fora de linha** | Para responder "está esgotado, mas temos estas alternativas" (manual 7.3), em vez de "não encontrei" |
+| **Filtro de preço usa o preço vigente** (promocional, se houver) | "Até R$ 2.000" deve incluir o Crafter HT-100, que custa R$ 2.399 de tabela e R$ 1.967,18 em promoção |
+| **Pedido só é exibido com número + e-mail ou telefone do titular.** Todos os dados informados precisam conferir, a comparação é em tempo constante, e a resposta é idêntica para "pedido inexistente" e "dados não conferem" | LGPD: não revela quais pedidos existem nem dados de terceiros. O modelo `Order` não carrega e-mail nem telefone |
+| **Banco gerado sob demanda** (`open_repository` roda o pipeline se o SQLite não existir) | Quem clona o repositório não precisa de um passo manual extra |
+
 ## Limitações conhecidas
 
 - **Validação de marcas por dicionário.** A detecção de descrições conflitantes usa uma lista de
   marcas e modelos conhecidos. Uma marca nova no catálogo precisa ser adicionada a `BRANDS` em
   `products.py`.
+- **Busca textual por regras.** Sinônimos ("acústico" vs. "folk", "elétrico" vs.
+  "eletroacústico") não são tratados. Com um catálogo maior, valeria uma busca híbrida (BM25 +
+  embeddings).
 - **Promoções sem datas.** Sem datas de vigência, `is_active` é a única fonte de verdade.
 - **Divergências não resolvidas na origem.** Telefone, status do produto 130 e totais dos pedidos
   3 e 20 precisariam ser confirmados com a loja. Com mais tempo, o relatório de qualidade viraria
