@@ -1,9 +1,13 @@
-"""Agente de atendimento: grafo ReAct em LangGraph.
+"""Agente de atendimento: grafo ReAct em LangGraph com guardrails.
 
-    START → agent ⇄ tools → (resposta)
+    START → input_guard → agent ⇄ tools → (resposta verificada)
 
-- `agent`: o LLM recebe o system prompt (montado a cada turno, com data/hora e status da
-  loja) e o histórico, e decide entre responder ou chamar ferramentas.
+- `input_guard`: mascara cartão/CPF antes de a mensagem entrar no histórico, detecta
+  tentativas de manipulação e trunca mensagens longas (ver `guards.py`).
+- `agent`: o LLM recebe o system prompt (montado a cada turno, com data/hora, status da
+  loja e avisos do guardrail) e o histórico, e decide entre responder ou chamar
+  ferramentas. A resposta final é verificada: protocolos e preços citados precisam ter
+  vindo das ferramentas (ver `verification.py`).
 - `tools`: executa as ferramentas pedidas e devolve os resultados ao `agent`.
 
 O grafo é montado à mão (em vez do agente pronto do LangGraph) para que guardrails de
@@ -31,7 +35,8 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from emporio.agent.prompts import build_system_prompt
-from emporio.agent.verification import ungrounded_protocols
+from emporio.agent.guards import check_input, required_warnings
+from emporio.agent.verification import correction_message, verify_reply
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings
 from emporio.handoff import HandoffStore
@@ -53,6 +58,10 @@ FALLBACK_ERROR = (
 FALLBACK_UNGROUNDED_TICKET = (
     "Desculpa, não consegui registrar o seu atendimento agora. Para garantir que a equipe veja o "
     f"seu caso, fale com a gente pelo WhatsApp {STORE_INFO['phone_whatsapp']}."
+)
+FALLBACK_UNGROUNDED_PRICE = (
+    "Desculpa, quero te passar os valores certinhos e não consegui confirmar agora. Pode me "
+    f"perguntar de novo? Se preferir, a equipe confirma pelo WhatsApp {STORE_INFO['phone_whatsapp']}."
 )
 FALLBACK_LOOP = (
     "Desculpa, não consegui chegar a uma resposta segura para isso. Vou deixar com a equipe: "
@@ -87,36 +96,67 @@ def recent_history(messages: list[AnyMessage], limit: int = MAX_HISTORY_MESSAGES
     return window[-1:]
 
 
+class AgentState(MessagesState):
+    # Avisos do guardrail de entrada para o turno atual (sobrescritos a cada mensagem).
+    guard_notes: list[str]
+    guard_flags: list[str]
+
+
+def input_guard_node(state: AgentState) -> dict[str, Any]:
+    last = state["messages"][-1]
+    if not isinstance(last, HumanMessage):
+        return {"guard_notes": [], "guard_flags": []}
+    check = check_input(str(last.content))
+    update: dict[str, Any] = {"guard_notes": check.notes, "guard_flags": sorted(check.flags)}
+    if check.flags:
+        logger.info("Guardrail de entrada: %s", ", ".join(sorted(check.flags)))
+    if check.text != last.content:
+        # Mesmo id: substitui a mensagem original no histórico, que nunca é gravada sem máscara.
+        update["messages"] = [HumanMessage(content=check.text, id=last.id)]
+    return update
+
+
+def system_prompt_for_turn(now_prompt: str, notes: list[str]) -> SystemMessage:
+    if not notes:
+        return SystemMessage(now_prompt)
+    warnings = "\n".join(f"- {note}" for note in notes)
+    return SystemMessage(f"{now_prompt}\n# Avisos sobre a mensagem atual\n{warnings}\n")
+
+
 def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, checkpointer: BaseCheckpointSaver):
     bound = model.bind_tools(tools)
 
-    def agent_node(state: MessagesState) -> dict[str, list[AnyMessage]]:
-        system = SystemMessage(build_system_prompt(clock()))
+    def agent_node(state: AgentState) -> dict[str, list[AnyMessage]]:
+        system = system_prompt_for_turn(build_system_prompt(clock()), state.get("guard_notes") or [])
         history = recent_history(state["messages"])
         response = bound.invoke([system, *history])
+        if response.tool_calls:
+            return {"messages": [response]}
 
-        # Verificação: protocolos citados precisam ter sido emitidos por escalate_to_human.
+        # Verificação de saída: protocolos e preços citados precisam ter vindo das ferramentas.
+        issues = verify_reply(message_text(response), state["messages"])
+        if issues:
+            logger.warning("Resposta com dados não verificados: %s; pedindo correção.", issues)
+            # A correção não é salva no histórico: só vale para esta nova tentativa.
+            response = bound.invoke([system, *history, response, correction_message(issues)])
+            remaining = [] if response.tool_calls else verify_reply(message_text(response), state["messages"])
+            if remaining:
+                logger.error("Modelo insistiu em dados não verificados (%s); usando resposta segura.", remaining)
+                kinds = {issue.kind for issue in remaining}
+                response = AIMessage(FALLBACK_UNGROUNDED_TICKET if "ticket" in kinds else FALLBACK_UNGROUNDED_PRICE)
+
+        # Avisos obrigatórios (cartão, CPF) que o modelo não incluiu são acrescentados.
         if not response.tool_calls:
-            invented = ungrounded_protocols(message_text(response), state["messages"])
-            if invented:
-                logger.warning("Protocolo inventado pelo modelo: %s; pedindo correção.", invented)
-                correction = HumanMessage(
-                    "[Verificação automática interna, não é mensagem do cliente] Sua resposta cita "
-                    f"protocolo(s) {sorted(invented)} que não foram emitidos por escalate_to_human. "
-                    "Se for registrar o caso, chame escalate_to_human agora; caso contrário, "
-                    "responda sem citar protocolo."
-                )
-                # A correção não é salva no histórico: só vale para esta nova tentativa.
-                response = bound.invoke([system, *history, response, correction])
-                if not response.tool_calls and ungrounded_protocols(message_text(response), state["messages"]):
-                    logger.error("Modelo insistiu em protocolo inventado; usando resposta segura.")
-                    response = AIMessage(FALLBACK_UNGROUNDED_TICKET)
+            if missing := required_warnings(state.get("guard_flags") or [], message_text(response)):
+                response = AIMessage(content="\n\n".join([*missing, message_text(response)]), id=response.id)
         return {"messages": [response]}
 
-    graph = StateGraph(MessagesState)
+    graph = StateGraph(AgentState)
+    graph.add_node("input_guard", input_guard_node)
     graph.add_node("agent", agent_node)
     graph.add_node("tools", ToolNode(tools))
-    graph.add_edge(START, "agent")
+    graph.add_edge(START, "input_guard")
+    graph.add_edge("input_guard", "agent")
     graph.add_conditional_edges("agent", tools_condition)
     graph.add_edge("tools", "agent")
     return graph.compile(checkpointer=checkpointer)
