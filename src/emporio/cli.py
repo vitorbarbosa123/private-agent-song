@@ -23,6 +23,7 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from langchain_core.messages import AIMessage, HumanMessage
 from rich.prompt import Prompt
@@ -121,7 +122,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.message:
         for message in args.message:
-            console.print(f"[bold cyan]Você:[/bold cyan] {message}")
+            console.print(f"[bold cyan]Você:[/bold cyan] {escape(message)}")
             ask(session, message, args.debug)
         return
 
