@@ -33,6 +33,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from emporio.agent.prompts import build_system_prompt
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings
+from emporio.handoff import HandoffStore
 from emporio.llm import build_chat_model
 from emporio.policy_rules import STORE_INFO
 from emporio.rag.retriever import PolicyRetriever
@@ -86,7 +87,9 @@ def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, check
 
     def agent_node(state: MessagesState) -> dict[str, list[AnyMessage]]:
         system = SystemMessage(build_system_prompt(clock()))
-        response = bound.invoke([system, *recent_history(state["messages"])])
+        history = recent_history(state["messages"])
+        response = bound.invoke([system, *history])
+
         return {"messages": [response]}
 
     graph = StateGraph(MessagesState)
@@ -118,6 +121,7 @@ class EmporioAgent:
         policies: PolicyRetriever | None = None,
         clock: Clock | None = None,
         checkpointer: BaseCheckpointSaver | None = None,
+        handoffs: HandoffStore | None = None,
     ) -> None:
         s = settings or get_settings()
         self.settings = s
@@ -126,6 +130,7 @@ class EmporioAgent:
         self.policies = policies if policies is not None else PolicyRetriever.from_settings(s)
         self.clock = clock or make_clock(s)
         self.checkpointer = checkpointer or InMemorySaver()
+        self.handoffs = handoffs or HandoffStore(":memory:")
 
     def new_session(self, thread_id: str | None = None) -> ChatSession:
         return ChatSession(self, thread_id or uuid.uuid4().hex)
@@ -134,7 +139,11 @@ class EmporioAgent:
 class ChatSession:
     def __init__(self, agent: EmporioAgent, thread_id: str) -> None:
         self.thread_id = thread_id
-        self.tool_context = ToolContext(repo=agent.repo, clock=agent.clock, policies=agent.policies)
+        self.checkpointer = agent.checkpointer
+        self.tool_context = ToolContext(
+            repo=agent.repo, clock=agent.clock, policies=agent.policies,
+            handoffs=agent.handoffs, session_id=thread_id,
+        )
         self.graph = build_graph(agent.model, build_tools(self.tool_context), agent.clock, agent.checkpointer)
 
     @property
@@ -143,6 +152,10 @@ class ChatSession:
 
     def history(self) -> list[AnyMessage]:
         return self.graph.get_state(self._config).values.get("messages", [])
+
+    def forget(self) -> None:
+        """Apaga o histórico desta conversa (pedido do cliente, LGPD)."""
+        self.checkpointer.delete_thread(self.thread_id)
 
     def send(self, message: str) -> AgentReply:
         try:
@@ -173,6 +186,16 @@ class ChatSession:
         return AgentReply(text, calls)
 
 
-def create_agent(settings: Settings | None = None) -> EmporioAgent:
-    """Agente com a configuração do ambiente (.env)."""
-    return EmporioAgent(settings)
+def create_agent(settings: Settings | None = None, *, persistent: bool = True) -> EmporioAgent:
+    """Agente com a configuração do ambiente (.env).
+
+    Com `persistent=True`, o histórico das conversas e os atendimentos encaminhados ficam
+    em SQLite no diretório de estado (`EMPORIO_STATE_DIR`, padrão `var/`).
+    """
+    s = settings or get_settings()
+    if not persistent:
+        return EmporioAgent(s)
+    from emporio.agent.memory import open_checkpointer
+
+    return EmporioAgent(s, checkpointer=open_checkpointer(s.conversations_path),
+                        handoffs=HandoffStore(s.handoffs_path))
