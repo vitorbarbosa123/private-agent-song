@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "langchain-openai>=1.7.3",
     "langgraph>=1.2.19",
+    "langgraph-checkpoint-sqlite>=3.1.3",
     "pandas>=2.2",
     "pydantic-settings>=2.16.2",
     "pypdf>=5.0",
@@ -21,6 +22,7 @@ emporio-clean-data = "emporio.data.pipeline:main"
 emporio-llm-check = "emporio.llm:main"
 emporio-eval-retrieval = "emporio.rag.evaluate:main"
 emporio-chat = "emporio.cli:main"
+emporio-handoffs = "emporio.handoff:main"
 
 [dependency-groups]
 dev = [

@@ -5,8 +5,8 @@ fictícia de instrumentos musicais em Campo Grande/MS. Desenvolvido como desafio
 vaga de AI Engineer na Artefact.
 
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
-> dados**, **configuração do modelo**, **ferramentas do agente**, **busca no manual (RAG)** e
-> **agente com interface de terminal**. As seções sobre o agente serão preenchidas conforme a
+> dados**, **configuração do modelo**, **ferramentas do agente**, **busca no manual (RAG)**,
+> **agente com interface de terminal** e **histórico persistente com encaminhamento para humanos**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
@@ -35,6 +35,7 @@ uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/
 uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
 uv run emporio-eval-retrieval [--dataset holdout]  # avalia a busca no manual de políticas
 uv run emporio-chat        # conversa com a assistente no terminal
+uv run emporio-handoffs    # painel da equipe: atendimentos encaminhados pela assistente
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
 
@@ -46,10 +47,14 @@ uv run emporio-chat --debug                  # mostra as ferramentas chamadas e 
 uv run emporio-chat --now 2026-03-02T10:30   # simula data/hora (os pedidos da base são de 2025-2026)
 uv run emporio-chat --model openai/gpt-4o-mini            # testa outro modelo sem editar o .env
 uv run emporio-chat -m "Oi" -m "Quanto custa o Takamine GD20?"  # roteiro não interativo
+uv run emporio-chat --sessions               # lista conversas salvas
+uv run emporio-chat --session <id>           # retoma uma conversa (o id aparece ao sair)
+uv run emporio-chat --no-persist             # não grava histórico nem atendimentos
+uv run emporio-handoffs [--all] [--close N]  # equipe: lista e encerra atendimentos encaminhados
 ```
 
-Durante a conversa: `/novo` inicia outra conversa, `/debug` liga e desliga os detalhes, `/sair`
-encerra.
+Durante a conversa: `/novo` inicia outra conversa, `/esquecer` apaga o histórico da conversa
+atual, `/debug` liga e desliga os detalhes, `/sair` encerra.
 
 Dados de teste para consultar pedidos (fictícios, de `data/`): pedido **8** com o e-mail
 `anacarol.ferreira@coldmail.com` (enviado, com rastreio) ou pedido **7** com
@@ -81,6 +86,7 @@ LLM_MODEL=@preset/emporio-agent         # volta ao preset padrão
 | `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | Ajustes finos | `0.2`, `60`, `2` |
 | `EMBEDDING_MODEL` | Modelo de embeddings da busca no manual (mesma chave e endpoint). Vazio = só BM25, sem rede | `google/gemini-embedding-001` |
 | `RETRIEVAL_MODE` | `embeddings`, `hybrid` ou `bm25` | `embeddings` |
+| `EMPORIO_STATE_DIR` | Onde ficam o histórico das conversas e os atendimentos encaminhados (SQLite) | `var/` |
 | `EMPORIO_NOW` | Fixa a data e hora vistas pelo agente (ex.: `2026-03-02T10:30`), para demonstrações reproduzíveis | relógio real |
 
 Exemplo com modelo local, sem chave: `LLM_BASE_URL=http://localhost:11434/v1` e
@@ -105,7 +111,8 @@ data/
 └── processed/                       # artefatos gerados pelo pipeline (não versionados, exceto o relatório de qualidade)
 src/emporio/
 ├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
-├── agent/                           # grafo LangGraph e system prompt (persona "Lia")
+├── agent/                           # grafo LangGraph, prompt, memória e verificação de respostas
+├── handoff.py                       # registro de atendimentos encaminhados + painel da equipe
 ├── cli.py                           # interface de terminal (emporio-chat)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
 ├── business_hours.py                # relógio da loja, horário de funcionamento e feriados
@@ -218,6 +225,7 @@ todas são testadas sem LLM. O [registro](src/emporio/tools/registry.py) as exp�
 | `payment_options` | "Em quantas vezes posso pagar?" | Faixas de parcela mínima; PIX só nos itens sem promoção; combinação de pagamentos acima de R$ 2.000 |
 | `shipping_quote` | "Entregam em Dourados?" | Valor só quando é calculável (Campo Grande); avisa sobre frete especial para itens grandes |
 | `search_policies` | "Qual o prazo para devolução?" | Trechos do manual com o número da seção, mais a interpretação oficial quando o trecho é ambíguo (ver abaixo) |
+| `escalate_to_human` | "Meu violão veio trincado", "Quero falar com uma pessoa" | Registra o caso para a equipe com resumo e contato; devolve protocolo (`ATD-00001`) e prazo de retorno conforme o horário (reclamação: 24 horas úteis); não duplica atendimentos abertos |
 | `store_status` | "Vocês estão abertos?" | Horário no fuso de Campo Grande, feriados (inclusive móveis) e próxima abertura |
 
 Decisões de desenho:
@@ -325,6 +333,26 @@ como nós explícitos do grafo. O LangGraph também traz o checkpointer de hist�
   O agente não muda de papel, não revela o prompt, não cria descontos e não fala de pedidos sem
   verificação de identidade.
 
+**Histórico persistente** ([`agent/memory.py`](src/emporio/agent/memory.py)). Cada conversa é
+salva em SQLite pelo checkpointer do LangGraph, e o cliente pode retomá-la depois com
+`--session`. Persistir faz sentido para a experiência: quem volta perguntando "qual era meu
+protocolo?" ou "e aquele violão que você indicou?" não precisa repetir tudo. Como o histórico
+contém dados pessoais, ele fica fora do repositório (`var/`), e o comando `/esquecer` apaga a
+conversa, atendendo ao direito de exclusão da LGPD (manual, seção 9).
+
+**Encaminhamento para humanos** ([`handoff.py`](src/emporio/handoff.py)). Reclamações, defeitos,
+cancelamentos e pedidos para falar com uma pessoa são registrados com um resumo para a equipe,
+que não precisa reler a conversa. A equipe acompanha pelo `uv run emporio-handoffs`. Numa loja
+real, esse registro seria trocado por uma integração com o CRM ou o WhatsApp Business.
+
+**Verificação das respostas** ([`agent/verification.py`](src/emporio/agent/verification.py)).
+Num teste real, o modelo disse "vou registrar seu caso", **não** chamou a ferramenta e inventou
+um protocolo ("#ESCALATE-7-DEFEITO-LETICIA"). Ajustar o prompt reduz esse risco, mas não o
+elimina. Por isso cada resposta final é conferida de forma determinística: todo protocolo citado
+precisa ter sido emitido por `escalate_to_human` na conversa. Se não foi, o modelo recebe uma
+correção (que não fica no histórico) e responde de novo. Se insistir, o cliente recebe uma
+mensagem segura com o WhatsApp da loja.
+
 **Robustez:**
 
 - **Uma `ChatSession` por conversa,** com o seu próprio contexto de ferramentas. O limite de 3
@@ -339,6 +367,10 @@ como nós explícitos do grafo. O LangGraph também traz o checkpointer de hist�
   esses cenários com um modelo roteirizado, sem rede.
 
 ## Limitações conhecidas
+
+- **Limite de tentativas de verificação por processo.** O contador de tentativas erradas de
+  identificação é por conversa, mas fica em memória: se a conversa for retomada em outro
+  processo, ele recomeça. Numa API real, ficaria no estado persistido da conversa.
 
 - **Validação de marcas por dicionário.** A detecção de descrições conflitantes usa uma lista de
   marcas e modelos conhecidos. Uma marca nova no catálogo precisa ser adicionada a `BRANDS` em

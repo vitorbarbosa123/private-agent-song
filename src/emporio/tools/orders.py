@@ -267,5 +267,8 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
         result.eligible = False
         result.decision = ("Fora da garantia legal. Verifique a garantia do fabricante (de 6 meses a 2 "
                            "anos, conforme o certificado do produto); a loja pode intermediar.")
-    result.next_steps = ["Pedir fotos ou vídeo do defeito.", "Encaminhar para um atendente avaliar o caso."]
+    result.next_steps = [
+        "Pedir fotos ou vídeo do defeito.",
+        "Registrar o caso com escalate_to_human (reason='defeito'), incluindo este resultado no resumo.",
+    ]
     return result

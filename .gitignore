@@ -15,6 +15,9 @@ desafio_tecnico_ai_eng_artefact.pdf
 data/processed/*
 !data/processed/data_quality_report.md
 
+# Estado de execução (conversas e atendimentos encaminhados; contém dados pessoais)
+var/
+
 # IDE
 .vscode/
 .idea/
