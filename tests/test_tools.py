@@ -337,7 +337,7 @@ def test_store_status_holiday(make_ctx: MakeCtx) -> None:
 def test_registry_exposes_all_tools(ctx: ToolContext) -> None:
     tools = build_tools(ctx)
     assert [t.name for t in tools] == list(TOOL_NAMES)
-    assert len(set(TOOL_NAMES)) == len(TOOL_NAMES) == 10
+    assert len(set(TOOL_NAMES)) == len(TOOL_NAMES) == 11
     for tool in tools:
         assert len(tool.description) > 40
 

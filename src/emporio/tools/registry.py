@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel
 
-from emporio.tools import commerce, orders, policies, products, store
+from emporio.tools import commerce, handoff, orders, policies, products, store
 from emporio.tools.context import ToolContext
 
 ToolFn = Callable[[ToolContext, Any], BaseModel]
@@ -84,6 +84,14 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
         "Consulta o manual de políticas da loja: trocas e devoluções, garantia, formas de pagamento, "
         "frete, promoções, privacidade (LGPD), endereço e contatos. Use para qualquer pergunta sobre "
         "regras. Para casos de um pedido específico prefira check_return_eligibility, que calcula os prazos.",
+    ),
+    (
+        "escalate_to_human",
+        handoff.escalate_to_human,
+        handoff.EscalateInput,
+        "Registra o caso para a equipe humana e devolve um protocolo. Use para reclamações, defeitos, "
+        "cancelamentos, devoluções aprovadas (requires_human), quando o cliente pedir uma pessoa ou "
+        "quando você não souber responder. Exige um telefone ou e-mail de contato do cliente.",
     ),
     (
         "store_status",
