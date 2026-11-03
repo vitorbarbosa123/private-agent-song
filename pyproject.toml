@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "langchain-openai>=1.7.3",
+    "langgraph>=1.2.19",
     "pandas>=2.2",
     "pydantic-settings>=2.16.2",
     "pypdf>=5.0",
     "rapidfuzz>=3.14.6",
+    "rich>=15.0.0",
     "snowballstemmer>=3.1.1",
     "tzdata>=2026.6",
 ]
@@ -18,6 +20,7 @@ dependencies = [
 emporio-clean-data = "emporio.data.pipeline:main"
 emporio-llm-check = "emporio.llm:main"
 emporio-eval-retrieval = "emporio.rag.evaluate:main"
+emporio-chat = "emporio.cli:main"
 
 [dependency-groups]
 dev = [

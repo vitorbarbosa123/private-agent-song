@@ -151,6 +151,9 @@ class ReturnEligibilityResult(BaseModel):
     eligible: bool | None = None
     decision: str | None = None
     deadline: str | None = None
+    days_remaining: int | None = Field(
+        default=None, description="Dias corridos até o fim do prazo (0 = vence hoje). Use este valor; não calcule."
+    )
     days_elapsed: int | None = None
     date_basis: str | None = None
     conditions: list[str] = Field(default_factory=list)
@@ -206,6 +209,7 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
         result.days_elapsed = days_since_receipt
         result.deadline = br_date(deadline)
         result.eligible = today <= deadline
+        result.days_remaining = (deadline - today).days if result.eligible else None
         result.conditions = [
             "Produto na embalagem original, sem sinais de uso, com todos os acessórios e manuais.",
             *_COMMON_EXCLUSIONS,
@@ -250,10 +254,12 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
     if today <= store_deadline:
         result.eligible = True
         result.deadline = br_date(store_deadline)
+        result.days_remaining = (store_deadline - today).days
         result.decision = f"Dentro de {rules.DEFECT_EXCHANGE_DAYS} dias da compra: troca direta na loja."
     elif today <= legal_deadline:
         result.eligible = True
         result.deadline = br_date(legal_deadline)
+        result.days_remaining = (legal_deadline - today).days
         result.decision = (f"Fora dos {rules.DEFECT_EXCHANGE_DAYS} dias de troca direta, mas dentro da "
                            f"garantia legal de {rules.LEGAL_WARRANTY_DAYS} dias: a loja intermedia o "
                            "reparo ou troca com o fabricante.")

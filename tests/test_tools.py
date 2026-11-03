@@ -209,6 +209,7 @@ def test_withdrawal_within_7_days(make_ctx: MakeCtx) -> None:
     result = _returns(make_ctx("2026-02-20T10:00"), "arrependimento")
     assert result.eligible is True
     assert result.deadline == "24/02/2026"
+    assert result.days_remaining == 4
     assert "previsão de entrega" in result.date_basis
     assert result.requires_human
 
