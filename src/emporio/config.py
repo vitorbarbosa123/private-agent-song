@@ -67,6 +67,16 @@ class Settings(BaseSettings):
 
     # --- Dados ---------------------------------------------------------------
     database_path: Path = Field(default=PROCESSED_DIR / "emporio.db", validation_alias="EMPORIO_DB_PATH")
+    # Estado de execução: histórico das conversas e atendimentos encaminhados à equipe.
+    state_dir: Path = Field(default=PROJECT_ROOT / "var", validation_alias="EMPORIO_STATE_DIR")
+
+    @property
+    def conversations_path(self) -> Path:
+        return self.state_dir / "conversations.sqlite"
+
+    @property
+    def handoffs_path(self) -> Path:
+        return self.state_dir / "handoffs.sqlite"
 
     @property
     def is_openrouter(self) -> bool:
