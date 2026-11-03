@@ -61,6 +61,7 @@ def build_chat_model(settings: Settings | None = None, *, role: Role = "main") -
         base_url=s.llm_base_url,
         api_key=api_key,
         temperature=s.llm_temperature,
+        max_tokens=s.llm_max_tokens,
         timeout=s.llm_timeout_seconds,
         max_retries=s.llm_max_retries,
         default_headers=headers or None,
@@ -81,19 +82,62 @@ def describe(settings: Settings) -> str:
     return "\n".join(lines)
 
 
+def _hint(exc: Exception) -> str:
+    """Orientação para os erros de configuração mais comuns do OpenRouter."""
+    text = str(exc)
+    if "ZDR" in text or "guardrail" in text:
+        return ("Dica: um guardrail do workspace (ex.: Zero Data Retention) excluiu todos os "
+                "endpoints compatíveis. Ajuste os Guardrails do workspace (link na mensagem acima) ou escolha "
+                "outro modelo em LLM_MODEL / no preset.")
+    if "402" in text or "credits" in text:
+        return "Dica: crédito insuficiente para a chave. Reduza LLM_MAX_TOKENS ou aumente o limite da chave."
+    if "401" in text:
+        return "Dica: chave inválida. Confira LLM_API_KEY no .env."
+    return ""
+
+
+def _check_tool_calling(settings: Settings) -> str:
+    """O agente depende de chamada de ferramentas: confirma que o modelo a suporta."""
+    from langchain_core.tools import tool
+
+    @tool
+    def consultar_preco(produto: str) -> str:
+        """Consulta o preço de um produto da loja pelo nome."""
+        return "R$ 100,00"
+
+    response = build_chat_model(settings).bind_tools([consultar_preco]).invoke(
+        "Use a ferramenta para consultar o preço do Takamine GD20."
+    )
+    if not response.tool_calls:
+        raise RuntimeError("o modelo respondeu sem chamar a ferramenta (suporte a tools ausente?)")
+    return response.response_metadata.get("model_name", "?")
+
+
 def main() -> None:
-    """Mostra a configuração ativa e faz uma chamada mínima ao modelo."""
+    """Mostra a configuração ativa e testa uma chamada simples e uma com ferramentas."""
     settings = get_settings()
     print(describe(settings))
-    try:
-        response = build_chat_model(settings).invoke("Responda apenas com a palavra: ok")
-    except LLMConfigError as exc:
-        sys.exit(f"\nErro de configuração: {exc}")
-    except Exception as exc:  # noqa: BLE001 — erro de rede/autenticação mostrado ao usuário
-        sys.exit(f"\nFalha ao chamar o modelo: {type(exc).__name__}: {exc}")
-    served_by = response.response_metadata.get("model_name", "?")
-    print(f"\nResposta:    {str(response.content).strip()!r}")
-    print(f"Atendido por: {served_by}")
+    checks = (
+        ("Chamada simples", lambda: build_chat_model(settings)
+            .invoke("Responda apenas com a palavra: ok").response_metadata.get("model_name", "?")),
+        ("Chamada com ferramentas", lambda: _check_tool_calling(settings)),
+    )
+    print()
+    failed = False
+    for label, check in checks:
+        try:
+            served_by = check()
+        except LLMConfigError as exc:
+            sys.exit(f"Erro de configuração: {exc}")
+        except Exception as exc:  # noqa: BLE001 — erro de rede/autenticação mostrado ao usuário
+            failed = True
+            print(f"[FALHOU] {label}: {type(exc).__name__}: {str(exc)[:300]}")
+            if hint := _hint(exc):
+                print(f"         {hint}")
+        else:
+            print(f"[OK]     {label} (atendido por {served_by})")
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

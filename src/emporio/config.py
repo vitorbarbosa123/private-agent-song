@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # LLM_MODEL for um modelo concreto; presets já trazem seus próprios fallbacks.
     llm_fallback_models: str = Field(default="", validation_alias="LLM_FALLBACK_MODELS")
     llm_temperature: float = Field(default=0.2, validation_alias="LLM_TEMPERATURE")
+    # Limite de tokens da resposta. Sem ele, o OpenRouter reserva crédito para o máximo do
+    # modelo (ex.: 16k) e recusa a chamada (402) em chaves com limite de crédito baixo.
+    llm_max_tokens: int = Field(default=1024, validation_alias="LLM_MAX_TOKENS")
     llm_timeout_seconds: float = Field(default=60.0, validation_alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=2, validation_alias="LLM_MAX_RETRIES")
 
