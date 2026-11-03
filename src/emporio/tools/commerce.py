@@ -46,6 +46,7 @@ class PaymentOptionsInput(_AmountOrProducts):
 class PaymentOptionsResult(BaseModel):
     total: str
     pix: str
+    pix_savings: str | None = Field(default=None, description="Quanto o cliente economiza no PIX.")
     pix_note: str
     debit: str
     boleto: str
@@ -96,6 +97,7 @@ def payment_options(ctx: ToolContext, args: PaymentOptionsInput) -> PaymentOptio
     return PaymentOptionsResult(
         total=brl(total),
         pix=brl(pix_total),
+        pix_savings=brl(total - pix_total) if pix_total < total else None,
         pix_note=pix_note,
         debit=f"{brl(total)} à vista (todas as bandeiras)",
         boleto=f"{brl(total)} à vista; compensação em até 3 dias úteis",

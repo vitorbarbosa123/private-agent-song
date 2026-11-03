@@ -58,6 +58,7 @@ def test_product_price_takamine(ctx: ToolContext) -> None:
     assert result.found
     assert result.product.price.list_price == "R$ 2.199,00"
     assert result.product.price.pix_price == "R$ 2.089,05"
+    assert result.product.price.pix_savings == "R$ 109,95"
     assert result.product.price.promotion is None  # promoção de 12% inativa
 
 
@@ -97,6 +98,7 @@ def test_promotion_is_shown_with_original_price(ctx: ToolContext) -> None:
     assert product.price.list_price == "R$ 2.399,00"
     assert product.price.promotion.discount == "18%"
     assert product.price.promotion.price == "R$ 1.967,18"
+    assert product.price.promotion.savings == "R$ 431,82"
     assert product.price.pix_price is None  # não acumula
 
 
@@ -211,6 +213,7 @@ def test_withdrawal_within_7_days(make_ctx: MakeCtx) -> None:
     assert result.deadline == "24/02/2026"
     assert result.days_remaining == 4
     assert "previsão de entrega" in result.date_basis
+    assert "PREVISÃO" in result.notes[0]
     assert result.requires_human
 
 
@@ -223,6 +226,7 @@ def test_withdrawal_uses_customer_received_date(ctx: ToolContext) -> None:
     result = _returns(ctx, "arrependimento", received_date=date(2026, 2, 27))
     assert result.eligible is True and result.deadline == "06/03/2026"
     assert "informada pelo cliente" in result.date_basis
+    assert result.notes == []
 
 
 def test_received_date_in_future_is_rejected(ctx: ToolContext) -> None:
@@ -264,7 +268,7 @@ def test_returns_require_verification(ctx: ToolContext) -> None:
 
 def test_payment_options_regular_product(ctx: ToolContext) -> None:
     result = payment_options(ctx, PaymentOptionsInput(product_ids=[95]))
-    assert result.pix == "R$ 2.089,05"
+    assert result.pix == "R$ 2.089,05" and result.pix_savings == "R$ 109,95"
     assert result.credit_max_installments == 12
     assert result.credit_options[-1] == "12x de R$ 183,25 sem juros"
     assert result.split_payment_allowed
@@ -273,6 +277,7 @@ def test_payment_options_regular_product(ctx: ToolContext) -> None:
 def test_payment_options_promotional_product_has_no_pix_discount(ctx: ToolContext) -> None:
     result = payment_options(ctx, PaymentOptionsInput(product_ids=[90]))
     assert result.total == result.pix == "R$ 1.967,18"
+    assert result.pix_savings is None
     assert "não acumula" in result.pix_note
     assert not result.split_payment_allowed  # 1.967,18 < 2.000
 

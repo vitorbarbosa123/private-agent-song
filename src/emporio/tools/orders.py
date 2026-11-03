@@ -160,6 +160,7 @@ class ReturnEligibilityResult(BaseModel):
     next_steps: list[str] = Field(default_factory=list)
     policy_sections: list[str] = Field(default_factory=list)
     requires_human: bool = False
+    notes: list[str] = Field(default_factory=list)
 
 
 def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> ReturnEligibilityResult:
@@ -202,6 +203,11 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
 
     days_since_receipt = (today - received).days
     result.date_basis = f"{basis}: {br_date(received)}"
+    if args.received_date is None and order.estimated_delivery is not None:
+        result.notes.append(
+            "A data usada é a PREVISÃO de entrega, não a data real. Diga isso ao cliente (ex.: 'pela "
+            "previsão de entrega, dia 17/02') e, se ele recebeu em outra data, consulte de novo com received_date."
+        )
 
     if args.reason in {"arrependimento", "troca_preferencia"}:
         limit = rules.WITHDRAWAL_DAYS if args.reason == "arrependimento" else rules.PREFERENCE_EXCHANGE_DAYS
