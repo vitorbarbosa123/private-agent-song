@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel
 
 from emporio.tools import commerce, orders, products, store
@@ -89,7 +89,12 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
 
 def _wrap(ctx: ToolContext, name: str, fn: ToolFn, schema: type[BaseModel], description: str) -> BaseTool:
     def run(**kwargs: Any) -> str:
-        result = fn(ctx, schema(**kwargs))
+        try:
+            result = fn(ctx, schema(**kwargs))
+        except Exception as exc:  # noqa: BLE001
+            # O LangChain só converte ToolException em mensagem; qualquer outro erro
+            # derrubaria a conversa em vez de deixar o modelo se corrigir.
+            raise ToolException(str(exc)) from exc
         return result.model_dump_json(exclude_none=True)
 
     return StructuredTool.from_function(
