@@ -80,8 +80,7 @@ da OpenAI, o mesmo código funciona com outros provedores compatíveis. Toda a c
 ```
 data/
 ├── *.csv, políticas_da_loja.pdf     # dados brutos fornecidos pela loja (nunca alterados)
-└── processed/                       # artefatos gerados pelo pipeline (não versionados,
-                                     # exceto o relatório de qualidade)
+└── processed/                       # artefatos gerados pelo pipeline (não versionados, exceto o relatório de qualidade)
 src/emporio/
 ├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
@@ -103,10 +102,6 @@ tests/
 ## Tratamento dos dados
 
 ### Princípio: sinalizar em vez de corrigir silenciosamente
-
-Os dados brutos têm inconsistências propositais. Um agente de atendimento que repassa dado errado
-ao cliente pode configurar propaganda enganosa (o próprio manual alerta para isso na seção 7.1).
-Por isso o pipeline segue três regras:
 
 1. **Os arquivos originais nunca são alterados.** Toda saída vai para `data/processed/`.
 2. **Só corrigimos o que é inequívoco**, como um erro de digitação. Nos demais casos o valor
