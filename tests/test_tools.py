@@ -336,7 +336,7 @@ def test_store_status_holiday(make_ctx: MakeCtx) -> None:
 def test_registry_exposes_all_tools(ctx: ToolContext) -> None:
     tools = build_tools(ctx)
     assert [t.name for t in tools] == list(TOOL_NAMES)
-    assert len(set(TOOL_NAMES)) == len(TOOL_NAMES) == 9
+    assert len(set(TOOL_NAMES)) == len(TOOL_NAMES) == 10
     for tool in tools:
         assert len(tool.description) > 40
 
@@ -352,3 +352,10 @@ def test_registry_turns_errors_into_messages(ctx: ToolContext) -> None:
     tools = {t.name: t for t in build_tools(ctx)}
     message = tools["payment_options"].invoke({})
     assert isinstance(message, str) and "Parâmetros inválidos" in message
+
+
+def test_registry_turns_runtime_errors_into_messages(ctx: ToolContext) -> None:
+    """Erros dentro da ferramenta (não só de validação) também viram mensagem."""
+    tools = {t.name: t for t in build_tools(ctx)}
+    message = tools["payment_options"].invoke({"product_ids": [9999]})
+    assert message.startswith("Erro ao executar payment_options") and "Nenhum dos produtos" in message

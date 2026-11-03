@@ -10,12 +10,14 @@ dependencies = [
     "pydantic-settings>=2.16.2",
     "pypdf>=5.0",
     "rapidfuzz>=3.14.6",
+    "snowballstemmer>=3.1.1",
     "tzdata>=2026.6",
 ]
 
 [project.scripts]
 emporio-clean-data = "emporio.data.pipeline:main"
 emporio-llm-check = "emporio.llm:main"
+emporio-eval-retrieval = "emporio.rag.evaluate:main"
 
 [dependency-groups]
 dev = [

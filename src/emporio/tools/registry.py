@@ -10,10 +10,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel
 
-from emporio.tools import commerce, orders, products, store
+from emporio.tools import commerce, orders, policies, products, store
 from emporio.tools.context import ToolContext
 
 ToolFn = Callable[[ToolContext, Any], BaseModel]
@@ -78,6 +78,14 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
         "em Campo Grande. Para outras cidades, informa transportadoras e prazos (valor só no checkout).",
     ),
     (
+        "search_policies",
+        policies.search_policies,
+        policies.SearchPoliciesInput,
+        "Consulta o manual de políticas da loja: trocas e devoluções, garantia, formas de pagamento, "
+        "frete, promoções, privacidade (LGPD), endereço e contatos. Use para qualquer pergunta sobre "
+        "regras. Para casos de um pedido específico prefira check_return_eligibility, que calcula os prazos.",
+    ),
+    (
         "store_status",
         store.store_status,
         products.NoInput,
@@ -89,7 +97,12 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
 
 def _wrap(ctx: ToolContext, name: str, fn: ToolFn, schema: type[BaseModel], description: str) -> BaseTool:
     def run(**kwargs: Any) -> str:
-        result = fn(ctx, schema(**kwargs))
+        try:
+            result = fn(ctx, schema(**kwargs))
+        except Exception as exc:  # noqa: BLE001
+            # O LangChain só converte ToolException em mensagem; qualquer outro erro
+            # derrubaria a conversa em vez de deixar o modelo se corrigir.
+            raise ToolException(str(exc)) from exc
         return result.model_dump_json(exclude_none=True)
 
     return StructuredTool.from_function(
