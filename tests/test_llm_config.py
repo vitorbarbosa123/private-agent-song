@@ -52,6 +52,7 @@ def test_openrouter_client_with_fallbacks() -> None:
         "models": ["anthropic/claude-sonnet-4.5", "openai/gpt-4o-mini", "google/gemini-2.5-flash"]
     }
     assert "X-Title" in model.default_headers
+    assert model.max_tokens == 1024  # evita reservar crédito para o máximo do modelo
 
 
 def test_fast_role_uses_fast_model() -> None:

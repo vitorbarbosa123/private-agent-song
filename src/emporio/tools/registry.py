@@ -1,0 +1,109 @@
+"""Expõe as ferramentas como `StructuredTool` do LangChain, prontas para o agente.
+
+As funções em `products`, `orders`, `commerce` e `store` são Python puro e testáveis sem
+LLM. Aqui só as embrulhamos: o resultado vira JSON e erros viram mensagens para o modelo
+(em vez de derrubar a conversa).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
+
+from langchain_core.tools import BaseTool, StructuredTool
+from pydantic import BaseModel
+
+from emporio.tools import commerce, orders, products, store
+from emporio.tools.context import ToolContext
+
+ToolFn = Callable[[ToolContext, Any], BaseModel]
+
+# (nome, função, esquema de entrada, descrição para o LLM)
+_SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
+    (
+        "search_products",
+        products.search_products,
+        products.SearchProductsInput,
+        "Busca instrumentos no catálogo por categoria, faixa de preço, marca, tipo de corda, "
+        "eletrônica ou texto livre. Use para perguntas abertas: 'quais violões até R$ 1000?', "
+        "'tem ukulele tenor?'. Por padrão retorna só itens disponíveis para venda.",
+    ),
+    (
+        "get_product_details",
+        products.get_product_details,
+        products.GetProductInput,
+        "Consulta preço, disponibilidade e especificações de um produto citado pelo nome ou "
+        "modelo ('quanto custa o Takamine GD20?'). Se o produto não estiver à venda, retorna "
+        "alternativas. Se o nome for ambíguo, retorna candidatos para você perguntar ao cliente.",
+    ),
+    (
+        "list_categories",
+        products.list_categories,
+        products.NoInput,
+        "Lista as categorias de instrumentos da loja e quantos produtos há disponíveis em cada uma.",
+    ),
+    (
+        "list_promotions",
+        products.list_promotions,
+        products.NoInput,
+        "Lista as promoções vigentes, com preço original, desconto e preço promocional.",
+    ),
+    (
+        "get_order_status",
+        orders.get_order_status,
+        orders.OrderCredentials,
+        "Consulta status, itens, pagamento e rastreio de um pedido. Exige o número do pedido e o "
+        "e-mail OU telefone do titular. Peça esses dados ao cliente antes de chamar; nunca os invente.",
+    ),
+    (
+        "check_return_eligibility",
+        orders.check_return_eligibility,
+        orders.ReturnEligibilityInput,
+        "Verifica se um pedido pode ser devolvido (arrependimento), trocado por preferência ou "
+        "trocado/reparado por defeito, aplicando os prazos do manual. Exige número do pedido e "
+        "e-mail ou telefone do titular.",
+    ),
+    (
+        "payment_options",
+        commerce.payment_options,
+        commerce.PaymentOptionsInput,
+        "Calcula formas de pagamento: preço no PIX, parcelamento sem juros permitido e combinação "
+        "de pagamentos. Prefira passar product_ids (considera promoções). Nunca calcule parcelas por conta própria.",
+    ),
+    (
+        "shipping_quote",
+        commerce.shipping_quote,
+        commerce.ShippingQuoteInput,
+        "Informa regras de frete e prazo de entrega para uma cidade, com o valor quando a entrega é "
+        "em Campo Grande. Para outras cidades, informa transportadoras e prazos (valor só no checkout).",
+    ),
+    (
+        "store_status",
+        store.store_status,
+        products.NoInput,
+        "Informa se a loja está aberta agora, o horário de hoje e quando abre novamente. Use para "
+        "perguntas sobre horário de funcionamento ou quando o cliente quiser falar com a equipe.",
+    ),
+)
+
+
+def _wrap(ctx: ToolContext, name: str, fn: ToolFn, schema: type[BaseModel], description: str) -> BaseTool:
+    def run(**kwargs: Any) -> str:
+        result = fn(ctx, schema(**kwargs))
+        return result.model_dump_json(exclude_none=True)
+
+    return StructuredTool.from_function(
+        func=run,
+        name=name,
+        description=description,
+        args_schema=schema,
+        handle_tool_error=lambda e: f"Erro ao executar {name}: {e}",
+        handle_validation_error=lambda e: f"Parâmetros inválidos para {name}: {e}",
+    )
+
+
+def build_tools(ctx: ToolContext) -> list[BaseTool]:
+    return [_wrap(ctx, *spec) for spec in _SPECS]
+
+
+TOOL_NAMES = tuple(spec[0] for spec in _SPECS)

@@ -5,7 +5,7 @@ fictícia de instrumentos musicais em Campo Grande/MS. Desenvolvido como desafio
 vaga de AI Engineer na Artefact.
 
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
-> dados** e **configuração do modelo**. As seções sobre o agente serão preenchidas conforme a
+> dados**, **configuração do modelo** e **ferramentas do agente**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
@@ -16,6 +16,7 @@ vaga de AI Engineer na Artefact.
 - [Tratamento dos dados](#tratamento-dos-dados)
 - [Interpretações do manual de políticas](#interpretações-do-manual-de-políticas)
 - [Camada de acesso aos dados](#camada-de-acesso-aos-dados)
+- [Ferramentas do agente](#ferramentas-do-agente)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -52,12 +53,16 @@ LLM_MODEL=@preset/emporio-agent         # volta ao preset padrão
 | `LLM_FAST_MODEL` | Modelo barato para tarefas auxiliares (guardrails, avaliação) | usa `LLM_MODEL` |
 | `LLM_FALLBACK_MODELS` | Fallbacks na própria requisição, separados por vírgula (só OpenRouter) | nenhum |
 | `LLM_BASE_URL` | Qualquer API compatível com a da OpenAI: OpenAI direto, Ollama local etc. | OpenRouter |
+| `LLM_MAX_TOKENS` | Limite de tokens da resposta. Sem ele, o OpenRouter reserva crédito para o máximo do modelo e pode recusar a chamada em chaves com limite de gasto | `1024` |
 | `LLM_TEMPERATURE`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` | Ajustes finos | `0.2`, `60`, `2` |
+| `EMPORIO_NOW` | Fixa a data e hora vistas pelo agente (ex.: `2026-03-02T10:30`), para demonstrações reproduzíveis | relógio real |
 
 Exemplo com modelo local, sem chave: `LLM_BASE_URL=http://localhost:11434/v1` e
 `LLM_MODEL=llama3.1`. O comando `uv run emporio-llm-check` mostra a configuração ativa (com a
-chave mascarada) e qual modelo de fato atendeu a requisição, o que é útil para confirmar um
-fallback.
+chave mascarada) e testa uma chamada simples e outra **com ferramentas**, de que o agente depende.
+Para cada uma, informa qual modelo de fato atendeu, o que é útil para confirmar um fallback. Em
+caso de erro, dá dicas para os problemas mais comuns do OpenRouter: crédito, chave inválida ou
+guardrails de privacidade do workspace que excluem os endpoints do modelo.
 
 **Por que OpenRouter.** Uma única chave e uma API compatível com a da OpenAI dão acesso a modelos
 de vários fornecedores. Isso permite trocar ou comparar modelos sem mexer em código e configurar
@@ -76,7 +81,9 @@ data/
 src/emporio/
 ├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
+├── business_hours.py                # relógio da loja, horário de funcionamento e feriados
 ├── repository/                      # consultas fixas, somente leitura, sobre o SQLite tratado
+├── tools/                           # ferramentas do agente (funções puras + registro LangChain)
 └── data/
     ├── pipeline.py                  # orquestração, escrita dos artefatos e relatório
     ├── products.py                  # catálogo: specs, descrições, disponibilidade
@@ -148,6 +155,8 @@ pipeline, para validar pedidos, quanto pelo agente.
 | "Até 3x sem valor mínimo (exceto abaixo de R$ 50)" | 2x e 3x exigem parcela de no mínimo R$ 50; 1x é sempre permitido | É a única leitura que dá sentido à exceção e mantém a progressão 50 → 80 → 100 |
 | Frete grátis "acima" e taxa "abaixo" de R$ 500: o valor exato fica sem regra | R$ 500,00 ou mais tem frete grátis | Interpretação mais favorável ao consumidor (CDC, art. 47) |
 | Troca por defeito em 30 dias (4.2) vs. garantia legal de 90 dias (8.1) | Regras complementares: loja troca até 30 dias; garantia legal até 90 dias, com intermediação da loja; depois, fabricante. Casos de defeito são encaminhados a um humano | A loja responde solidariamente durante a garantia legal |
+| A "região metropolitana" do frete por motoboy não tem municípios definidos | Motoboy (R$ 35 ou grátis a partir de R$ 500) só em Campo Grande; outras cidades, Correios/Jadlog com valor no checkout | As outras cidades da base ficam a mais de 200 km; prometer motoboy seria arriscado |
+| Os prazos de arrependimento e de garantia contam do recebimento, mas a base não registra a data real de entrega | Usa a data informada pelo cliente; na falta dela, a previsão de entrega, e a resposta diz qual data foi usada | É a melhor aproximação disponível, e é transparente |
 | O direito de arrependimento vale para compras online, mas os pedidos não informam o canal | Todos os pedidos da base são tratados como online | Todos passam por fluxo de envio e entrega |
 | "Mais de 300 instrumentos" vs. 65 produtos na base | O agente responde só com o que está no sistema | Manual 7.1: nunca informar sem consultar o sistema |
 
@@ -167,6 +176,39 @@ tipados.
 | **Pedido só é exibido com número + e-mail ou telefone do titular.** Todos os dados informados precisam conferir, a comparação é em tempo constante, e a resposta é idêntica para "pedido inexistente" e "dados não conferem" | LGPD: não revela quais pedidos existem nem dados de terceiros. O modelo `Order` não carrega e-mail nem telefone |
 | **Banco gerado sob demanda** (`open_repository` roda o pipeline se o SQLite não existir) | Quem clona o repositório não precisa de um passo manual extra |
 
+## Ferramentas do agente
+
+As ferramentas ficam em [`src/emporio/tools/`](src/emporio/tools/). Cada uma é uma **função Python
+pura**, que recebe um contexto (repositório + relógio) e devolve um modelo Pydantic. Por isso
+todas são testadas sem LLM. O [registro](src/emporio/tools/registry.py) as expõe como
+`StructuredTool` do LangChain, com descrições que dizem ao modelo **quando** usar cada uma.
+
+| Ferramenta | Pergunta típica | O que garante |
+|---|---|---|
+| `search_products` | "Quais violões até R$ 1000?" | Filtros estruturados; só itens à venda por padrão; redireciona pedidos de acessórios; avisa quando a categoria está vazia |
+| `get_product_details` | "Quanto custa o Takamine GD20?" | Preço de tabela, promoção (com percentual) e PIX; alternativas se esgotado ou fora de linha; pede esclarecimento se o nome for ambíguo ("Martin D28" → D-28 ou D-28E?) |
+| `list_categories`, `list_promotions` | "O que vocês vendem?", "Tem promoção?" | Só promoções ativas, já com a regra de não acumular com o PIX |
+| `get_order_status` | "Cadê meu pedido 8?" | Exige pedido + e-mail ou telefone; avisa atraso de entrega; bloqueia após 3 tentativas erradas na conversa |
+| `check_return_eligibility` | "Me arrependi, posso devolver?" | Calcula prazos (7 dias de arrependimento, 30 de troca por defeito, 90 de garantia legal) e diz qual data usou |
+| `payment_options` | "Em quantas vezes posso pagar?" | Faixas de parcela mínima; PIX só nos itens sem promoção; combinação de pagamentos acima de R$ 2.000 |
+| `shipping_quote` | "Entregam em Dourados?" | Valor só quando é calculável (Campo Grande); avisa sobre frete especial para itens grandes |
+| `store_status` | "Vocês estão abertos?" | Horário no fuso de Campo Grande, feriados (inclusive móveis) e próxima abertura |
+
+Decisões de desenho:
+
+- **Valores já formatados.** As ferramentas devolvem "R$ 2.199,00" e "24/02/2026", e as
+  parcelas já calculadas. O LLM só repete esses valores: contas e formatação feitas pelo modelo
+  são uma fonte clássica de alucinação, e o manual (7.1) proíbe informar preço sem consultar o sistema.
+- **Notas para o modelo.** Cada resultado traz `notes` com a orientação de política aplicável,
+  como "não acumula com PIX", "não diga se o pedido existe" ou "ofereça alternativas". A regra
+  chega no momento em que é relevante, em vez de depender só do system prompt.
+- **Erros viram mensagens.** Parâmetros inválidos ou falhas retornam texto para o modelo se
+  corrigir, em vez de derrubar a conversa.
+- **Relógio injetável** (`EMPORIO_NOW`). Os pedidos da base são de 2025–2026; fixar a data torna
+  demonstrações e testes de prazos reproduzíveis.
+- **Feriados.** São considerados os nacionais (inclusive a Sexta-feira Santa, calculada a partir
+  da Páscoa), o estadual de MS (11/10) e o municipal de Campo Grande (26/08).
+
 ## Limitações conhecidas
 
 - **Validação de marcas por dicionário.** A detecção de descrições conflitantes usa uma lista de
@@ -175,6 +217,10 @@ tipados.
 - **Busca textual por regras.** Sinônimos ("acústico" vs. "folk", "elétrico" vs.
   "eletroacústico") não são tratados. Com um catálogo maior, valeria uma busca híbrida (BM25 +
   embeddings).
+- **Data real de entrega.** A base só tem a previsão de entrega; os prazos de devolução usam a
+  data informada pelo cliente ou essa previsão.
+- **Feriados municipais de outras cidades e pontos facultativos** (Carnaval, Corpus Christi) não
+  são considerados no horário da loja.
 - **Promoções sem datas.** Sem datas de vigência, `is_active` é a única fonte de verdade.
 - **Divergências não resolvidas na origem.** Telefone, status do produto 130 e totais dos pedidos
   3 e 20 precisariam ser confirmados com a loja. Com mais tempo, o relatório de qualidade viraria

@@ -28,6 +28,24 @@ PAYMENT_TYPES = ("pix", "debit", "credit", "boleto")
 
 FREE_SHIPPING_THRESHOLD = Decimal("500.00")  # >= 500 → grátis (ver RESOLUTIONS)
 METRO_SHIPPING_FEE = Decimal("35.00")
+METRO_DELIVERY_DAYS = "1 a 3 dias úteis"
+# Municípios atendidos pelo motoboy próprio (ver RESOLUTIONS: "Região metropolitana").
+METRO_CITIES = frozenset({"campo grande"})
+NATIONAL_CARRIERS: tuple[tuple[str, str], ...] = (
+    ("PAC (Correios)", "5 a 12 dias úteis"),
+    ("SEDEX (Correios)", "2 a 5 dias úteis"),
+    ("Jadlog (.package)", "3 a 8 dias úteis"),
+)
+# Categorias com "instrumentos de grande porte" que podem exigir frete especial (5.2).
+SPECIAL_FREIGHT_CATEGORY_IDS = frozenset({3, 4, 8})  # baterias, teclados/pianos, cordas orquestrais (contrabaixo)
+
+# Acessórios que a loja NÃO vende (1 e 7.1). Usado para redirecionar o cliente.
+ACCESSORY_KEYWORDS = frozenset({
+    "corda", "cordas", "encordoamento", "palheta", "palhetas", "cabo", "cabos", "case", "cases",
+    "bag", "capa", "pedal", "pedais", "pedaleira", "amplificador", "amplificadores", "amp",
+    "caixa de som", "afinador", "metronomo", "estante", "suporte", "baqueta", "baquetas",
+    "correia", "capotraste", "microfone",
+})
 
 # --- Prazos (seções 4 e 8) ---------------------------------------------------
 
@@ -151,6 +169,26 @@ RESOLUTIONS: tuple[PolicyResolution, ...] = (
         "exato de R$ 500,00 não é coberto.",
         decision="Pedidos de R$ 500,00 ou mais têm frete grátis.",
         rationale="Interpretação mais favorável ao consumidor (art. 47 do CDC).",
+    ),
+    PolicyResolution(
+        topic="Região metropolitana de Campo Grande",
+        sections="5.1",
+        conflict="O manual dá regras de frete para a 'região metropolitana', mas não lista os "
+        "municípios que a compõem.",
+        decision="Entrega por motoboy (regra de R$ 500/R$ 35) só para Campo Grande. Demais "
+        "cidades: Correios/Jadlog, com valor calculado no checkout.",
+        rationale="Os clientes da base estão em Campo Grande ou em cidades a mais de 200 km "
+        "(Dourados, Três Lagoas, Corumbá, Ponta Porã). Prometer motoboy para outro município "
+        "sem confirmação seria arriscado.",
+    ),
+    PolicyResolution(
+        topic="Data de recebimento do pedido",
+        sections="4.1 e 8.1",
+        conflict="Os prazos de arrependimento e de garantia contam do recebimento, mas a base "
+        "só tem a previsão de entrega, não a data real.",
+        decision="Usa a data informada pelo cliente; na falta dela, a previsão de entrega. A "
+        "resposta deixa claro qual data foi usada.",
+        rationale="É a melhor aproximação disponível e é transparente com o cliente.",
     ),
     PolicyResolution(
         topic="Troca por defeito vs. garantia legal",
