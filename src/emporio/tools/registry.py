@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from pydantic import BaseModel
 
-from emporio.tools import commerce, orders, products, store
+from emporio.tools import commerce, orders, policies, products, store
 from emporio.tools.context import ToolContext
 
 ToolFn = Callable[[ToolContext, Any], BaseModel]
@@ -76,6 +76,14 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
         commerce.ShippingQuoteInput,
         "Informa regras de frete e prazo de entrega para uma cidade, com o valor quando a entrega é "
         "em Campo Grande. Para outras cidades, informa transportadoras e prazos (valor só no checkout).",
+    ),
+    (
+        "search_policies",
+        policies.search_policies,
+        policies.SearchPoliciesInput,
+        "Consulta o manual de políticas da loja: trocas e devoluções, garantia, formas de pagamento, "
+        "frete, promoções, privacidade (LGPD), endereço e contatos. Use para qualquer pergunta sobre "
+        "regras. Para casos de um pedido específico prefira check_return_eligibility, que calcula os prazos.",
     ),
     (
         "store_status",
