@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
-from typing import Literal
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict

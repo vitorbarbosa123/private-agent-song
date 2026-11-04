@@ -34,8 +34,8 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from emporio.agent.prompts import build_system_prompt
 from emporio.agent.guards import check_input, required_warnings
+from emporio.agent.prompts import build_system_prompt
 from emporio.agent.verification import correction_message, verify_reply
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings

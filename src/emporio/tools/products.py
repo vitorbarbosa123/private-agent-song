@@ -228,7 +228,7 @@ def get_product_details(ctx: ToolContext, args: GetProductInput) -> GetProductRe
         confident = [m for m in matches if m.score >= CONFIDENT_MATCH]
         if not confident:
             notes = ["Nenhum produto com esse nome no catálogo."]
-            if accessory := mentions_accessory(args.name):
+            if mentions_accessory(args.name):
                 notes = [ACCESSORY_NOTE]
             elif matches:
                 notes.append("Há nomes parecidos em 'candidates'; confirme com o cliente.")
