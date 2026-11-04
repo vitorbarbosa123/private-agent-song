@@ -5,6 +5,7 @@ description = "Agente de atendimento da Empório da Música (desafio técnico AI
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.162.0",
     "langchain-openai>=1.7.3",
     "langfuse>=5.1.0",
     "langgraph>=1.2.19",
@@ -17,6 +18,7 @@ dependencies = [
     "snowballstemmer>=3.1.1",
     "streamlit>=1.66.1",
     "tzdata>=2026.6",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -27,6 +29,7 @@ emporio-chat = "emporio.cli:main"
 emporio-handoffs = "emporio.handoff:main"
 emporio-eval-agent = "emporio.evals.agent_eval:main"
 emporio-export-examples = "emporio.evals.examples:main"
+emporio-api = "emporio.api:main"
 
 [dependency-groups]
 dev = [
