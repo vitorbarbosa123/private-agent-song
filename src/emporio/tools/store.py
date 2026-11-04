@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from emporio.business_hours import WEEKDAY_NAMES, describe_moment, store_status_at
+from emporio.policy_rules import STORE_INFO
 from emporio.tools.context import ToolContext
 from emporio.tools.products import NoInput
 
@@ -16,6 +17,8 @@ class StoreStatusResult(BaseModel):
     closes_at: str | None = None
     next_opening: str | None = None
     weekly_hours: list[str]
+    address: str
+    contact: str
     notes: list[str]
 
 
@@ -40,6 +43,10 @@ def store_status(ctx: ToolContext, _: NoInput | None = None) -> StoreStatusResul
             "Sábado: 09:00 às 13:00",
             "Domingos e feriados: fechado",
         ],
+        # Endereço e contatos juntos do horário: em perguntas como "onde fica e está aberto?",
+        # o modelo tendia a responder só com o resultado da ferramenta e omitir o endereço.
+        address=str(STORE_INFO["address"]),
+        contact=f"Telefone/WhatsApp {STORE_INFO['phone_whatsapp']} · {STORE_INFO['email']}",
         notes=[
             "O WhatsApp segue o mesmo horário. Fora do expediente, informe quando a equipe retorna.",
             "Em datas especiais (Black Friday, aniversário da loja, Natal) o horário pode ser "

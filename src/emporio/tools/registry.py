@@ -98,8 +98,9 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
         "store_status",
         store.store_status,
         products.NoInput,
-        "Informa se a loja está aberta agora, o horário de hoje e quando abre novamente. Use para "
-        "perguntas sobre horário de funcionamento ou quando o cliente quiser falar com a equipe.",
+        "Informa se a loja está aberta agora, o horário de hoje, quando abre novamente, o endereço e "
+        "os contatos. Use para perguntas sobre horário, localização ou quando o cliente quiser falar "
+        "com a equipe.",
     ),
 )
 

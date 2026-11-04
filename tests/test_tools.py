@@ -327,6 +327,7 @@ def test_store_status_open(ctx: ToolContext) -> None:
     result = store_status(ctx)
     assert result.is_open and result.closes_at == "18:00"
     assert result.now == "segunda-feira, 02/03/2026 10:30"
+    assert "Rua 14 de Maio, 3200" in result.address and "3341-4444" in result.contact
 
 
 def test_store_status_closed_saturday_afternoon(make_ctx: MakeCtx) -> None:
