@@ -6,9 +6,13 @@
 #   docker compose run --rm llm-check               # confere a configuração do modelo
 #   docker compose run --rm eval --judge --judge-model google/gemini-2.5-pro
 #   docker compose run --rm handoffs                # painel da equipe no terminal
+#   docker compose --profile observability up      # + Langfuse local em http://localhost:3000
 #
 # A chave e o modelo vêm do arquivo .env (veja .env.example). O histórico das conversas e
 # os atendimentos ficam no volume "emporio-state", compartilhado entre web e terminal.
+
+include:
+  - docker-compose.langfuse.yml  # serviços do Langfuse (só com --profile observability)
 
 x-app: &app
   build:
@@ -20,6 +24,8 @@ x-app: &app
       required: false
   environment:
     EMPORIO_STATE_DIR: /app/var
+    # Dentro da rede do compose o Langfuse local responde em langfuse-web (não em localhost).
+    LANGFUSE_HOST: ${LANGFUSE_DOCKER_HOST:-http://langfuse-web:3000}
   volumes:
     - emporio-state:/app/var
 

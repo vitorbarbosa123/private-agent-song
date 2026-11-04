@@ -40,7 +40,8 @@ from emporio.agent.verification import correction_message, verify_reply
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings
 from emporio.handoff import HandoffStore
-from emporio.llm import build_chat_model
+from emporio.llm import build_chat_model, resolve_model
+from emporio.observability import Tracer
 from emporio.policy_rules import STORE_INFO
 from emporio.rag.retriever import PolicyRetriever
 from emporio.repository import StoreRepository, open_repository
@@ -119,14 +120,17 @@ class AgentState(MessagesState):
     # Avisos do guardrail de entrada para o turno atual (sobrescritos a cada mensagem).
     guard_notes: list[str]
     guard_flags: list[str]
+    # Problemas que a verificação de saída corrigiu neste turno (para observabilidade).
+    verification_issues: list[str]
 
 
 def input_guard_node(state: AgentState) -> dict[str, Any]:
     last = state["messages"][-1]
     if not isinstance(last, HumanMessage):
-        return {"guard_notes": [], "guard_flags": []}
+        return {"guard_notes": [], "guard_flags": [], "verification_issues": []}
     check = check_input(str(last.content))
-    update: dict[str, Any] = {"guard_notes": check.notes, "guard_flags": sorted(check.flags)}
+    update: dict[str, Any] = {"guard_notes": check.notes, "guard_flags": sorted(check.flags),
+                              "verification_issues": []}
     if check.flags:
         logger.info("Guardrail de entrada: %s", ", ".join(sorted(check.flags)))
     if check.text != last.content:
@@ -145,16 +149,18 @@ def system_prompt_for_turn(now_prompt: str, notes: list[str]) -> SystemMessage:
 def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, checkpointer: BaseCheckpointSaver):
     bound = model.bind_tools(tools)
 
-    def agent_node(state: AgentState) -> dict[str, list[AnyMessage]]:
+    def agent_node(state: AgentState) -> dict[str, Any]:
         system = system_prompt_for_turn(build_system_prompt(clock()), state.get("guard_notes") or [])
         history = recent_history(state["messages"])
         response = bound.invoke([system, *history])
         if response.tool_calls:
             return {"messages": [response]}
+        found: list[str] = []
 
         # Verificação de saída: protocolos e preços citados precisam ter vindo das ferramentas.
         issues = verify_reply(message_text(response), state["messages"])
         if issues:
+            found = [f"{issue.kind}:{','.join(issue.values)}" for issue in issues]
             logger.warning("Resposta com dados não verificados: %s; pedindo correção.", issues)
             # A correção não é salva no histórico: só vale para esta nova tentativa.
             response = bound.invoke([system, *history, response, correction_message(issues)])
@@ -168,7 +174,10 @@ def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, check
         if not response.tool_calls:
             if missing := required_warnings(state.get("guard_flags") or [], message_text(response)):
                 response = AIMessage(content="\n\n".join([*missing, message_text(response)]), id=response.id)
-        return {"messages": [response]}
+        update: dict[str, Any] = {"messages": [response]}
+        if found:
+            update["verification_issues"] = [*(state.get("verification_issues") or []), *found]
+        return update
 
     graph = StateGraph(AgentState)
     graph.add_node("input_guard", input_guard_node)
@@ -211,6 +220,7 @@ class EmporioAgent:
         self.clock = clock or make_clock(s)
         self.checkpointer = checkpointer or InMemorySaver()
         self.handoffs = handoffs or HandoffStore(":memory:")
+        self.tracer = Tracer(s)
 
     def new_session(self, thread_id: str | None = None) -> ChatSession:
         return ChatSession(self, thread_id or uuid.uuid4().hex)
@@ -220,6 +230,9 @@ class ChatSession:
     def __init__(self, agent: EmporioAgent, thread_id: str) -> None:
         self.thread_id = thread_id
         self.checkpointer = agent.checkpointer
+        self.tracer = agent.tracer
+        self._model_label = resolve_model(agent.settings)
+        self._clock = agent.clock
         self.tool_context = ToolContext(
             repo=agent.repo, clock=agent.clock, policies=agent.policies,
             handoffs=agent.handoffs, session_id=thread_id,
@@ -238,8 +251,11 @@ class ChatSession:
         self.checkpointer.delete_thread(self.thread_id)
 
     def send(self, message: str) -> AgentReply:
+        metadata = {"conversa": self.thread_id, "data_simulada": self._clock().isoformat(timespec="minutes")}
         try:
-            result = self.graph.invoke({"messages": [HumanMessage(message)]}, self._config)
+            with self.tracer.turn(session_id=self.thread_id, model=self._model_label, metadata=metadata) as callbacks:
+                result = self.graph.invoke({"messages": [HumanMessage(message)]},
+                                           {**self._config, "callbacks": callbacks})
         except GraphRecursionError:
             logger.warning("Limite de iterações atingido na conversa %s", self.thread_id)
             return AgentReply(FALLBACK_LOOP, error=True)
@@ -265,8 +281,12 @@ class ChatSession:
                           if isinstance(m, AIMessage) and m.response_metadata.get("model_name")), None)
         if not text:
             logger.warning("Resposta vazia do modelo na conversa %s", self.thread_id)
-            return AgentReply(FALLBACK_ERROR, calls, True, *usage, model=served_by)
-        return AgentReply(text, calls, False, *usage, model=served_by)
+            reply = AgentReply(FALLBACK_ERROR, calls, True, *usage, model=served_by)
+        else:
+            reply = AgentReply(text, calls, False, *usage, model=served_by)
+        self.tracer.record(reply, guard_flags=result.get("guard_flags") or [],
+                           verification_issues=result.get("verification_issues") or [])
+        return reply
 
 
 def create_agent(settings: Settings | None = None, *, persistent: bool = True) -> EmporioAgent:
