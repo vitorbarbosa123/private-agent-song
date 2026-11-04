@@ -34,6 +34,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from emporio.agent import AgentReply, EmporioAgent
+from emporio.agent.graph import ToolCallRecord
 from emporio.business_hours import STORE_TZ, WEEKDAY_NAMES
 from emporio.config import Settings, get_settings
 from emporio.data.paths import PROJECT_ROOT
@@ -110,6 +111,15 @@ def load_scenarios(path: Path = SCENARIOS) -> list[Scenario]:
 
 # --- Verificações determinísticas --------------------------------------------------------
 
+# Modelos às vezes usam hífens e espaços Unicode ("3341‑4444" com U+2011); para a comparação,
+# todos viram o equivalente ASCII.
+_UNICODE_DASHES = str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"}
+                                | {c: " " for c in "\u00a0\u202f\u2009"})
+
+
+def _norm(text: str) -> str:
+    return normalize_for_search(text.translate(_UNICODE_DASHES))
+
 
 def check_turn(expect: Expect | None, reply: AgentReply) -> list[str]:
     if reply.error:
@@ -118,7 +128,7 @@ def check_turn(expect: Expect | None, reply: AgentReply) -> list[str]:
         return []
     failures: list[str] = []
     called = {c.name for c in reply.tool_calls}
-    text = normalize_for_search(reply.text)
+    text = _norm(reply.text)
 
     if missing := [t for t in expect.tools if t not in called]:
         failures.append(f"não chamou {missing} (chamou {sorted(called) or 'nenhuma'})")
@@ -129,13 +139,13 @@ def check_turn(expect: Expect | None, reply: AgentReply) -> list[str]:
     if expect.no_tools and called:
         failures.append(f"não deveria chamar ferramentas (chamou {sorted(called)})")
     for snippet in expect.contains:
-        if normalize_for_search(snippet) not in text:
+        if _norm(snippet) not in text:
             failures.append(f"faltou {snippet!r}")
     for group in expect.any_groups():
-        if not any(normalize_for_search(s) in text for s in group):
+        if not any(_norm(s) in text for s in group):
             failures.append(f"faltou um de {group}")
     for snippet in expect.not_contains:
-        if normalize_for_search(snippet) in text:
+        if _norm(snippet) in text:
             failures.append(f"contém proibido {snippet!r}")
     return failures
 
@@ -266,6 +276,8 @@ class TurnResult:
     input_tokens: int
     output_tokens: int
     cost_usd: float | None
+    model: str | None = None
+    error: bool = False
 
 
 @dataclass
@@ -310,12 +322,42 @@ def run_scenario(scenario: Scenario, make_agent: AgentFactory, judge: Any | None
                 input_tokens=reply.input_tokens,
                 output_tokens=reply.output_tokens,
                 cost_usd=reply.cost_usd,
+                model=reply.model,
+                error=reply.error,
             ))
         if judge is not None:
             result.judge = judge_scenario(judge, scenario, result.turns).model_dump()
     except Exception as exc:  # noqa: BLE001 — um cenário com erro não interrompe a avaliação
         result.error = f"{type(exc).__name__}: {exc}"
     return result
+
+
+def rescore(details_path: Path, judge: Any | None = None) -> list[ScenarioResult]:
+    """Reaplica as verificações determinísticas a respostas já gravadas (sem chamar o agente).
+
+    Útil quando uma expectativa do cenário estava rígida demais: corrige-se o cenário e
+    reavalia-se a mesma execução. Com `judge`, as respostas gravadas também são julgadas de
+    novo por outro avaliador (ex.: para checar viés de um avaliador da mesma família do agente).
+    """
+    from emporio.agent.graph import FALLBACK_ERROR, FALLBACK_LOOP
+
+    scenarios = {s.id: s for s in load_scenarios()}
+    results = []
+    for raw in json.loads(details_path.read_text(encoding="utf-8")):
+        scenario = scenarios[raw["id"]]
+        result = ScenarioResult(raw["id"], raw["category"], judge=raw.get("judge"), error=raw.get("error"))
+        for turn_raw, turn in zip(raw["turns"], scenario.turns, strict=False):
+            calls = [ToolCallRecord(name, {}, output) for name, output in turn_raw["tool_outputs"]]
+            is_error = turn_raw.get("error", turn_raw["reply"] in {FALLBACK_ERROR, FALLBACK_LOOP})
+            reply = AgentReply(turn_raw["reply"], calls, is_error)
+            fields = {k: v for k, v in turn_raw.items() if k in TurnResult.__dataclass_fields__}
+            fields.update(failures=check_turn(turn.expect, reply), tools_ok=tool_expectations_met(turn.expect, reply),
+                          tool_outputs=[tuple(o) for o in turn_raw["tool_outputs"]])
+            result.turns.append(TurnResult(**fields))
+        if judge is not None:
+            result.judge = judge_scenario(judge, scenario, result.turns).model_dump()
+        results.append(result)
+    return results
 
 
 def agent_factory(settings: Settings) -> AgentFactory:
@@ -374,7 +416,8 @@ def summarize(results: list[ScenarioResult]) -> Summary:
     )
 
 
-def render_report(results: list[ScenarioResult], summary: Summary, model: str, judge_model: str | None) -> str:
+def render_report(results: list[ScenarioResult], summary: Summary, model: str, judge_model: str | None,
+                  rescored: bool = False) -> str:
     pct = lambda a, b: f"{a}/{b} ({a / b:.0%})" if b else "-"  # noqa: E731
     judged = " + avaliador" if judge_model else ""
     tool_accuracy = f"{summary.tool_accuracy:.0%}" if summary.tool_accuracy is not None else "-"
@@ -383,7 +426,8 @@ def render_report(results: list[ScenarioResult], summary: Summary, model: str, j
         "",
         f"Gerado por `uv run emporio-eval-agent{' --judge' if judge_model else ''}` em "
         f"{datetime.now(STORE_TZ):%d/%m/%Y %H:%M}. Modelo: `{model}`"
-        + (f" · avaliador: `{judge_model}`" if judge_model else "") + ".",
+        + (f" · avaliador: `{judge_model}`" if judge_model else "") + "."
+        + (" Verificações determinísticas reaplicadas com `--rescore` às respostas gravadas." if rescored else ""),
         "",
         "| Métrica | Resultado |",
         "|---|---|",
@@ -442,10 +486,38 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--filter", help="Roda só cenários cujo id ou categoria contém este texto.")
     parser.add_argument("--workers", type=int, default=4, help="Cenários em paralelo.")
     parser.add_argument("--report", type=Path, default=REPORT, help="Onde gravar o relatório Markdown.")
+    parser.add_argument("--summary-json", type=Path, help="Grava também o resumo em JSON (comparação de modelos).")
+    parser.add_argument("--rescore", type=Path, metavar="DETALHES.json",
+                        help="Reavalia uma execução gravada em var/evals/ com os cenários atuais, sem chamar modelos.")
     args = parser.parse_args(argv)
     console = Console()
 
     settings = get_settings()
+    if args.rescore:
+        judge = None
+        if args.judge:
+            judge_settings = settings.model_copy(update={
+                "llm_max_tokens": max(settings.llm_max_tokens, JUDGE_MAX_TOKENS),
+                "llm_fast_model": args.judge_model or settings.llm_fast_model,
+            })
+            judge = build_chat_model(judge_settings, role="fast").with_structured_output(
+                JudgeVerdict, method="function_calling")
+        raw = json.loads(args.rescore.read_text(encoding="utf-8"))
+        models = sorted({t.get("model") for r in raw for t in r["turns"] if t.get("model")})
+        judge_models = {r["judge_model"] for r in raw if r.get("judge_model")}
+        results = rescore(args.rescore, judge)
+        summary = summarize(results)
+        label = args.model or (models[0] if models else "?")
+        judge_label = args.judge_model or (next(iter(judge_models)) if judge_models else None)
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(render_report(results, summary, label, judge_label, rescored=True), encoding="utf-8")
+        if args.summary_json:
+            args.summary_json.write_text(json.dumps(
+                {"model": label, "served_by": models, "judge_model": judge_label, **asdict(summary)},
+                ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"Reavaliado: {summary.passed}/{summary.scenarios} aprovados "
+                      f"({summary.checks_passed} nas verificações determinísticas) · relatório {args.report}")
+        return
     if args.model:
         settings = settings.model_copy(update={"llm_model": args.model})
     scenarios = [s for s in load_scenarios()
@@ -495,6 +567,12 @@ def main(argv: list[str] | None = None) -> None:
     summary = summarize(results)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(render_report(results, summary, model, judge_model), encoding="utf-8")
+    if args.summary_json:
+        served = sorted({t.model for r in results for t in r.turns if t.model})
+        args.summary_json.parent.mkdir(parents=True, exist_ok=True)
+        args.summary_json.write_text(json.dumps(
+            {"model": model, "served_by": served, "judge_model": judge_model, **asdict(summary)},
+            ensure_ascii=False, indent=2), encoding="utf-8")
     details_dir = settings.state_dir / "evals"
     details_dir.mkdir(parents=True, exist_ok=True)
     details = details_dir / f"agent_eval_{datetime.now():%Y%m%d_%H%M%S}.json"

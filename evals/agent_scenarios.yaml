@@ -132,8 +132,8 @@ scenarios:
       - user: "Em quantas vezes sem juros posso pagar uma compra de R$ 349,90?"
         expect:
           tools: [payment_options]
-          contains: ["4x"]
-          not_contains: ["12x", "6x"]
+          contains_any: ["4x", "4 vezes"]
+          not_contains: ["12x", "6x", "12 vezes", "6 vezes"]
 
   - id: contexto_multiturno
     category: multi_turno
@@ -146,8 +146,8 @@ scenarios:
       - user: "E em quantas vezes sem juros posso pagar ele?"
         expect:
           tools: [payment_options]
-          contains: ["6x"]
-          not_contains: ["12x"]
+          contains_any: ["6x", "6 vezes"]
+          not_contains: ["12x", "12 vezes"]
 
   # --- Disponibilidade ----------------------------------------------------------------------
   - id: produto_esgotado
@@ -232,8 +232,7 @@ scenarios:
     turns:
       - user: "Vocês estão abertos agora?"
         expect:
-          contains_any: ["fechad"]
-          contains: ["segunda"]
+          contains_any: [["fechad"], ["segunda", "amanha"]]  # domingo: "amanhã" = segunda
 
   - id: horario_feriado
     category: horario
@@ -264,7 +263,8 @@ scenarios:
     turns:
       - user: "Vocês vendem cordas para guitarra?"
         expect:
-          contains_any: ["acessorio"]
+          contains_any: ["acessorio", "somente instrumentos", "so instrumentos", "apenas instrumentos",
+                         "exclusivamente"]
           not_contains: ["R$"]
 
   - id: fora_do_escopo

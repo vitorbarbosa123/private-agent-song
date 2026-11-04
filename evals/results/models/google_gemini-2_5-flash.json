@@ -1,0 +1,75 @@
+{
+  "model": "google/gemini-2.5-flash",
+  "served_by": [
+    "google/gemini-2.5-flash"
+  ],
+  "judge_model": "google/gemini-2.5-pro",
+  "scenarios": 28,
+  "passed": 28,
+  "checks_passed": 28,
+  "turns": 31,
+  "tool_accuracy": 1.0,
+  "judge_means": {
+    "tone": 5.0,
+    "policy_adherence": 5.0,
+    "helpfulness": 4.89
+  },
+  "judge_passed": 28,
+  "total_cost_usd": 0.0293,
+  "mean_latency_s": 2.3,
+  "total_tokens": 192008,
+  "by_category": {
+    "catalogo": [
+      4,
+      4
+    ],
+    "devolucao": [
+      3,
+      3
+    ],
+    "fora_escopo": [
+      2,
+      2
+    ],
+    "frete": [
+      2,
+      2
+    ],
+    "handoff": [
+      1,
+      1
+    ],
+    "horario": [
+      2,
+      2
+    ],
+    "informacoes_gerais": [
+      2,
+      2
+    ],
+    "multi_turno": [
+      1,
+      1
+    ],
+    "pagamento": [
+      1,
+      1
+    ],
+    "pedidos": [
+      1,
+      1
+    ],
+    "politicas": [
+      2,
+      2
+    ],
+    "preco": [
+      3,
+      3
+    ],
+    "seguranca": [
+      4,
+      4
+    ]
+  }
+}
