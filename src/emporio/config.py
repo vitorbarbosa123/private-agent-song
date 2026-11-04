@@ -60,6 +60,13 @@ class Settings(BaseSettings):
         default="embeddings", validation_alias="RETRIEVAL_MODE"
     )
 
+    # --- Observabilidade (Langfuse) -------------------------------------------
+    # Rastreamento ativado só com as duas chaves. Ver emporio.observability.
+    langfuse_public_key: str | None = Field(default=None, validation_alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: SecretStr | None = Field(default=None, validation_alias="LANGFUSE_SECRET_KEY")
+    langfuse_host: str = Field(default="http://localhost:3000", validation_alias="LANGFUSE_HOST")
+    langfuse_environment: str = Field(default="local", validation_alias="LANGFUSE_ENVIRONMENT")
+
     # --- Relógio -------------------------------------------------------------
     # Data/hora fixa para demonstrações e testes reproduzíveis (ex.: 2026-03-25T10:30).
     # Sem fuso, é interpretada no horário da loja (America/Campo_Grande).
