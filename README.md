@@ -668,7 +668,7 @@ request, **sem precisar de chave de API**:
 
 | Job | Passos |
 |---|---|
-| `test` | `ruff check` (lint); `pytest` (266 testes, com modelo roteirizado); regenera os dados tratados e exige que o relatório de qualidade versionado esteja idêntico (garante que o pipeline é determinístico e que o relatório não ficou desatualizado); avaliação da busca no conjunto de validação em modo BM25 |
+| `test` | `ruff check` (lint); `pytest` (300 testes, com modelo roteirizado); regenera os dados tratados e exige que o relatório de qualidade versionado esteja idêntico (garante que o pipeline é determinístico e que o relatório não ficou desatualizado); avaliação da busca no conjunto de validação em modo BM25 |
 | `docker` | Build das imagens; testes dentro do container; sobe a interface web e espera o healthcheck |
 
 As avaliações que chamam o modelo (`emporio-eval-agent`, embeddings) ficam fora do CI: custam
