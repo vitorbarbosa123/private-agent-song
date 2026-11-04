@@ -13,6 +13,7 @@ vaga de AI Engineer na Artefact.
 ## Sumário
 
 - [Como rodar](#como-rodar)
+- [Conversas de exemplo](#conversas-de-exemplo)
 - [Interface web](#interface-web)
 - [Conversando pelo terminal](#conversando-pelo-terminal)
 - [Modelo de linguagem: como trocar](#modelo-de-linguagem-como-trocar)
@@ -72,6 +73,29 @@ uv run emporio-eval-agent [--judge]  # avaliação de ponta a ponta com 28 conve
 uv run emporio-handoffs    # painel da equipe: atendimentos encaminhados pela assistente
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
+
+## Conversas de exemplo
+
+Cinco conversas reais com a assistente, em [`examples/`](examples/):
+
+| Conversa | O que mostra |
+|---|---|
+| [Catálogo, indicação e parcelamento](examples/01-catalogo-e-indicacao.md) | Busca com filtro de preço, indicação para iniciante, parcelamento pelas faixas da política |
+| [Preço, PIX e entrega](examples/02-preco-pix-e-frete.md) | Preço sem a promoção inativa, economia no PIX, frete para outra cidade sem inventar valor |
+| [Devolução por arrependimento](examples/03-devolucao-por-arrependimento.md) | **Não trivial:** verificação de identidade, prazo de 7 dias calculado pela política, encaminhamento com protocolo após concordância |
+| [Defeito e garantia legal](examples/04-defeito-e-garantia.md) | **Não trivial:** fora dos 30 dias de troca direta, dentro dos 90 de garantia legal (conflito do manual resolvido) |
+| [Limites e segurança](examples/05-limites-e-seguranca.md) | Loja fechada no domingo, acessórios, tentativa de manipulação, dados de cartão removidos |
+
+Os exemplos são **gerados por script** (`uv run emporio-export-examples`) a partir de um roteiro
+de mensagens do cliente ([`evals/example_conversations.yaml`](evals/example_conversations.yaml)).
+As respostas e as ferramentas chamadas são as do agente real, e cada resposta traz um bloco
+expansível com as ferramentas usadas, os parâmetros e o resultado.
+
+Revisar os exemplos gerados revelou duas falhas, corrigidas na causa antes de regerar todos:
+numa mensagem com duas perguntas ("qual o endereço? estão abertos?"), a assistente respondia só a
+segunda; e, fora do expediente, dizia "ajudo quando puder", como se ela também tivesse horário.
+O prompt passou a exigir que todas as perguntas sejam respondidas e a deixar claro que só a
+equipe humana tem horário. A ferramenta de horário passou a devolver também o endereço.
 
 ## Interface web
 
