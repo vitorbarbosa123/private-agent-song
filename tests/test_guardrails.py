@@ -186,6 +186,13 @@ def test_card_warning_not_duplicated(tmp_path: Path, repo: StoreRepository) -> N
     assert reply.text == "Não mande dados de cartão por aqui, tá?"
 
 
+def test_card_word_alone_is_not_a_warning(tmp_path: Path, repo: StoreRepository) -> None:
+    """Achado da avaliação: 'pague no PIX, cartão ou boleto' não orienta o cliente."""
+    agent = _agent(tmp_path, repo, AIMessage("Pague no checkout com PIX, cartão ou boleto."))
+    reply = agent.new_session().send("cobra no 4111 1111 1111 1111")
+    assert reply.text.startswith("Por segurança, não envie dados de cartão")
+
+
 def test_no_warning_without_sensitive_data(tmp_path: Path, repo: StoreRepository) -> None:
     agent = _agent(tmp_path, repo, AIMessage("Oi!"))
     assert agent.new_session().send("Oi").text == "Oi!"

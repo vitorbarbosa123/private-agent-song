@@ -63,7 +63,10 @@ NOTE_TRUNCATED = (
 # o aviso é acrescentado à resposta se ela não tratar do assunto (ver graph.agent_node).
 CUSTOMER_WARNINGS: dict[str, tuple[re.Pattern[str], str]] = {
     "card": (
-        re.compile(r"cart[aã]o", re.IGNORECASE),
+        # Precisa ser uma orientação ("não envie dados de cartão"), não só a palavra "cartão":
+        # "pague no PIX, cartão ou boleto" não conta como aviso.
+        re.compile(r"\b(n[aã]o|nunca)\s+(envie|mande|compartilhe|passe|informe)\b[^.!?\n]{0,40}cart[aã]o",
+                   re.IGNORECASE),
         "Por segurança, não envie dados de cartão por aqui: removi o número da nossa conversa. "
         "O pagamento é feito com segurança no checkout.",
     ),
