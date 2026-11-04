@@ -18,13 +18,12 @@ import re
 from dataclasses import dataclass, field
 
 from emporio.data.utils import normalize_for_search
+from emporio.privacy import _CVV, _mask_cards, luhn_valid, mask_card_numbers  # noqa: F401
 
 MAX_MESSAGE_CHARS = 2000
 
-_CARD_CANDIDATE = re.compile(r"(?<!\d)(?:\d[ .-]?){13,19}(?!\d)")
 _CPF = re.compile(r"(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)")
 _CPF_LABELED = re.compile(r"\bcpf\b\D{0,15}(\d{11})(?!\d)", re.IGNORECASE)
-_CVV = re.compile(r"\b(cvv|cvc|codigo de seguranca)\b\D{0,10}\d{3,4}\b", re.IGNORECASE)
 
 # Padrões (já normalizados: minúsculas, sem acentos) de tentativas de manipulação.
 INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = tuple(re.compile(p) for p in (
@@ -89,31 +88,6 @@ class InputCheck:
     text: str
     notes: list[str] = field(default_factory=list)
     flags: set[str] = field(default_factory=set)
-
-
-def luhn_valid(digits: str) -> bool:
-    total = 0
-    for i, char in enumerate(reversed(digits)):
-        n = int(char)
-        if i % 2 == 1:
-            n = n * 2 - 9 if n > 4 else n * 2
-        total += n
-    return total % 10 == 0
-
-
-def _mask_cards(text: str) -> tuple[str, bool]:
-    found = False
-
-    def replace(match: re.Match[str]) -> str:
-        nonlocal found
-        digits = re.sub(r"\D", "", match.group())
-        # 14-19 dígitos + Luhn: evita confundir com telefones (até 13 dígitos com +55).
-        if 14 <= len(digits) <= 19 and luhn_valid(digits):
-            found = True
-            return f"[cartão final {digits[-4:]} removido]"
-        return match.group()
-
-    return _CARD_CANDIDATE.sub(replace, text), found
 
 
 def check_input(text: str) -> InputCheck:
