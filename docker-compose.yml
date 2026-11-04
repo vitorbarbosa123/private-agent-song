@@ -1,0 +1,71 @@
+# Uso:
+#   docker compose up --build                       # interface web em http://localhost:8501
+#   docker compose run --rm chat                    # chat no terminal
+#   docker compose run --rm chat --now 2026-03-02T10:30 --debug
+#   docker compose run --rm tests                   # testes (não precisam de chave de API)
+#   docker compose run --rm llm-check               # confere a configuração do modelo
+#   docker compose run --rm eval --judge --judge-model google/gemini-2.5-pro
+#   docker compose run --rm handoffs                # painel da equipe no terminal
+#
+# A chave e o modelo vêm do arquivo .env (veja .env.example). O histórico das conversas e
+# os atendimentos ficam no volume "emporio-state", compartilhado entre web e terminal.
+
+x-app: &app
+  build:
+    context: .
+    target: runtime
+  image: emporio-agent:latest
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    EMPORIO_STATE_DIR: /app/var
+  volumes:
+    - emporio-state:/app/var
+
+services:
+  web:
+    <<: *app
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+  chat:
+    <<: *app
+    profiles: [cli]
+    entrypoint: ["emporio-chat"]
+    stdin_open: true
+    tty: true
+
+  llm-check:
+    <<: *app
+    profiles: [cli]
+    entrypoint: ["emporio-llm-check"]
+
+  handoffs:
+    <<: *app
+    profiles: [cli]
+    entrypoint: ["emporio-handoffs"]
+
+  eval:
+    <<: *app
+    profiles: [cli]
+    entrypoint: ["emporio-eval-agent"]
+    volumes:
+      - emporio-state:/app/var
+      - ./evals/results:/app/evals/results
+
+  eval-retrieval:
+    <<: *app
+    profiles: [cli]
+    entrypoint: ["emporio-eval-retrieval"]
+
+  tests:
+    build:
+      context: .
+      target: dev
+    image: emporio-agent:dev
+    profiles: [cli]
+
+volumes:
+  emporio-state:

@@ -1,0 +1,17 @@
+# Segredos e estado local nunca entram na imagem
+.env
+var/
+
+# Gerados (a imagem gera os dados tratados no build)
+.venv/
+data/processed/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Fora do escopo da imagem
+.git/
+.vscode/
+.idea/
+desafio_tecnico_ai_eng_artefact.pdf
