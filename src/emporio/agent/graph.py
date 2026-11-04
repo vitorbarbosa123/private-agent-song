@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -35,7 +36,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from emporio.agent.guards import check_input, required_warnings
-from emporio.agent.prompts import build_system_prompt
+from emporio.agent.prompts import dynamic_prompt, static_prompt
 from emporio.agent.verification import correction_message, verify_reply
 from emporio.business_hours import Clock, make_clock
 from emporio.config import Settings, get_settings
@@ -139,18 +140,26 @@ def input_guard_node(state: AgentState) -> dict[str, Any]:
     return update
 
 
-def system_prompt_for_turn(now_prompt: str, notes: list[str]) -> SystemMessage:
-    if not notes:
-        return SystemMessage(now_prompt)
-    warnings = "\n".join(f"- {note}" for note in notes)
-    return SystemMessage(f"{now_prompt}\n# Avisos sobre a mensagem atual\n{warnings}\n")
+def system_prompt_for_turn(now: datetime, notes: list[str], *, cache: bool = False) -> SystemMessage:
+    """System prompt do turno: parte fixa (cacheável) + parte dinâmica (data, avisos)."""
+    dynamic = dynamic_prompt(now)
+    if notes:
+        warnings = "\n".join(f"- {note}" for note in notes)
+        dynamic += f"\n# Avisos sobre a mensagem atual\n{warnings}\n"
+    if not cache:
+        return SystemMessage(f"{static_prompt()}\n{dynamic}")
+    return SystemMessage(content=[
+        {"type": "text", "text": static_prompt(), "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": dynamic},
+    ])
 
 
-def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, checkpointer: BaseCheckpointSaver):
+def build_graph(model: BaseChatModel, tools: list[BaseTool], clock: Clock, checkpointer: BaseCheckpointSaver,
+                *, prompt_cache: bool = False):
     bound = model.bind_tools(tools)
 
     def agent_node(state: AgentState) -> dict[str, Any]:
-        system = system_prompt_for_turn(build_system_prompt(clock()), state.get("guard_notes") or [])
+        system = system_prompt_for_turn(clock(), state.get("guard_notes") or [], cache=prompt_cache)
         history = recent_history(state["messages"])
         response = bound.invoke([system, *history])
         if response.tool_calls:
@@ -237,7 +246,8 @@ class ChatSession:
             repo=agent.repo, clock=agent.clock, policies=agent.policies,
             handoffs=agent.handoffs, session_id=thread_id,
         )
-        self.graph = build_graph(agent.model, build_tools(self.tool_context), agent.clock, agent.checkpointer)
+        self.graph = build_graph(agent.model, build_tools(self.tool_context), agent.clock, agent.checkpointer,
+                                 prompt_cache=agent.settings.llm_prompt_cache)
 
     @property
     def _config(self) -> dict[str, Any]:
