@@ -308,6 +308,11 @@ def test_shipping_campo_grande(ctx: ToolContext, amount: float, fee: str) -> Non
     assert result.delivery_time == "1 a 3 dias úteis"
 
 
+def test_shipping_other_city_without_product_warns_about_large_items(ctx: ToolContext) -> None:
+    result = shipping_quote(ctx, ShippingQuoteInput(city="Corumbá"))
+    assert any("frete especial" in n for n in result.notes)
+
+
 def test_shipping_other_city_has_no_price(ctx: ToolContext) -> None:
     result = shipping_quote(ctx, ShippingQuoteInput(city="Dourados", product_ids=[140]))
     assert result.fee is None

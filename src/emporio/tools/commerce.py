@@ -112,7 +112,7 @@ def payment_options(ctx: ToolContext, args: PaymentOptionsInput) -> PaymentOptio
 
 
 class ShippingQuoteInput(_AmountOrProducts):
-    city: str = Field(description="Cidade de entrega informada pelo cliente.")
+    city: str = Field(description="Cidade de entrega informada pelo cliente (único campo obrigatório).")
 
 
 class ShippingQuoteResult(BaseModel):
@@ -133,11 +133,14 @@ def shipping_quote(ctx: ToolContext, args: ShippingQuoteInput) -> ShippingQuoteR
             notes.append(f"Produtos inexistentes ignorados: {missing}.")
         total = sum((Decimal(str(p.price.current_price_brl)) for p in products), Decimal("0"))
 
-    if any(p.category_id in rules.SPECIAL_FREIGHT_CATEGORY_IDS for p in products):
+    is_metro = normalize_for_search(args.city) in rules.METRO_CITIES
+    large_item = any(p.category_id in rules.SPECIAL_FREIGHT_CATEGORY_IDS for p in products)
+    # Fora de Campo Grande, o alerta vale mesmo sem produto definido (manual 5.2).
+    if large_item or (not is_metro and not products):
         notes.append("Instrumentos de grande porte (baterias, pianos digitais, contrabaixos) podem "
                      "exigir frete especial com cotação individual: confirme com a equipe.")
 
-    if normalize_for_search(args.city) in rules.METRO_CITIES:
+    if is_metro:
         result = ShippingQuoteResult(
             region="Campo Grande (entrega por motoboy próprio)",
             delivery_time=rules.METRO_DELIVERY_DAYS,
