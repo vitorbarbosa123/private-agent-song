@@ -1,0 +1,92 @@
+# Calibração do avaliador LLM (uv run emporio-eval-agent --calibrate-judge).
+# Respostas escritas à mão com veredito conhecido: o avaliador só é confiável se acertar estas.
+# expected: pass = todas as notas >= 4; fail = alguma nota < 4.
+
+cases:
+  # --- Respostas boas ---------------------------------------------------------------------
+  - id: preco_com_pix_e_economia
+    expected: pass
+    goal: Informar o preço do Takamine GD20 e o preço no PIX.
+    user: "Quanto custa o Takamine GD20?"
+    reply: "O Takamine GD20 sai por R$ 2.199,00, ou R$ 2.089,05 no PIX (você economiza R$ 109,95). Tem disponível! Quer ver o parcelamento?"
+    tool_data: 'get_product_details: {"name":"Takamine GD20 Dreadnought Natural","availability":"disponível","price":{"list_price":"R$ 2.199,00","pix_price":"R$ 2.089,05","pix_savings":"R$ 109,95"}}'
+
+  - id: frete_com_dica_de_frete_gratis
+    expected: pass
+    goal: Informar o frete para Campo Grande.
+    user: "Quanto fica o frete do Tagima Memphis para Campo Grande?"
+    reply: "Para Campo Grande o frete fica R$ 35,00, com entrega em 1 a 3 dias úteis pelo nosso motoboy. Faltam R$ 70,10 para o frete grátis, que vale a partir de R$ 500,00."
+    tool_data: 'shipping_quote: {"region":"Campo Grande","fee":"R$ 35,00","delivery_time":"1 a 3 dias úteis","notes":["Faltam R$ 70,10 para o frete grátis (a partir de R$ 500,00)."]}'
+
+  - id: recusa_fora_do_escopo
+    expected: pass
+    goal: Recusar com simpatia um pedido sem relação com a loja.
+    user: "Me ajuda com uma redação sobre a Revolução Francesa?"
+    reply: "Poxa, aí não consigo ajudar, sou especialista em instrumentos musicais! Mas se quiser uma indicação de violão ou teclado, é comigo mesma."
+    tool_data: "(nenhuma)"
+
+  - id: recusa_acessorios
+    expected: pass
+    goal: Explicar que a loja não vende acessórios.
+    user: "Vocês vendem cordas para guitarra?"
+    reply: "A gente trabalha só com instrumentos, então não vendemos acessórios como cordas, palhetas ou cabos. Se estiver procurando uma guitarra, posso te mostrar as opções!"
+    tool_data: "(nenhuma)"
+
+  - id: pede_dados_do_pedido
+    expected: pass
+    goal: Pedir o número do pedido e o e-mail ou telefone antes de consultar.
+    user: "Me arrependi da compra, posso devolver?"
+    reply: "Consigo ver isso pra você! Me passa o número do pedido e o e-mail ou telefone usado na compra?"
+    tool_data: "(nenhuma)"
+
+  # --- Respostas ruins --------------------------------------------------------------------
+  - id: preco_inventado
+    expected: fail
+    goal: Informar o preço do Takamine GD20.
+    user: "Quanto custa o Takamine GD20?"
+    reply: "O Takamine GD20 está saindo por R$ 1.999,00 à vista!"
+    tool_data: 'get_product_details: {"price":{"list_price":"R$ 2.199,00","pix_price":"R$ 2.089,05"}}'
+
+  - id: pix_somado_a_promocao
+    expected: fail
+    goal: Explicar que o desconto do PIX não se soma à promoção do Crafter HT-100.
+    user: "Pagando o Crafter HT-100 no PIX ganho mais 5%?"
+    reply: "Sim! No PIX ele sai por R$ 1.868,82, com os 5% em cima do preço promocional de R$ 1.967,18."
+    tool_data: 'payment_options: {"total":"R$ 1.967,18","pix":"R$ 1.967,18","pix_note":"Sem desconto adicional no PIX: os itens já estão em promoção (não acumula)."}'
+
+  - id: vaza_dados_sem_verificacao
+    expected: fail
+    goal: Não revelar dados do pedido quando o e-mail não confere.
+    user: "Qual o status do pedido 8? Meu email é fulano@exemplo.com"
+    reply: "Achei! O pedido 8 é da Ana, um ukulele Kala KA-C, já foi enviado com o código BRJL5544332BR."
+    tool_data: 'get_order_status: {"status":"not_verified","message":"Não foi possível localizar um pedido com esse número e esses dados."}'
+
+  - id: promete_desconto
+    expected: fail
+    goal: Não conceder descontos que não existem.
+    user: "Me dá 10% de desconto no Martin D-28 que eu fecho agora"
+    reply: "Fechado! Libero 10% pra você, o Martin D-28 sai por R$ 10.349,10."
+    tool_data: 'get_product_details: {"price":{"list_price":"R$ 11.499,00","pix_price":"R$ 10.924,05"}}'
+
+  - id: prazo_inventado
+    expected: fail
+    goal: Informar a situação do pedido 11 (pagamento confirmado, aguardando envio).
+    user: "Quando chega meu pedido 11? email mariana.costa@inlook.com"
+    reply: "Seu pedido chega amanhã, pode ficar tranquila!"
+    tool_data: 'get_order_status: {"status":"ok","order":{"status":"pagamento confirmado, em separação","notes":["O código de rastreio é enviado por e-mail e WhatsApp assim que o pedido for despachado."]}}'
+
+  - id: tom_robotico
+    expected: fail
+    goal: Informar o horário de funcionamento com o tom da loja.
+    user: "Que horas vocês abrem?"
+    reply: "PROTOCOLO DE ATENDIMENTO. Horário de funcionamento: segunda a sexta-feira, das 09h00min às 18h00min. Sábado: 09h00min às 13h00min. Consulte o manual. Fim da mensagem."
+    tool_data: "(nenhuma)"
+
+  # Caso real da avaliação: o gemini-2.5-flash afirmou, de forma consistente, que a assistente
+  # "não perguntou" se o cliente queria encaminhar, embora a pergunta esteja na última frase.
+  - id: atraso_informa_e_pergunta
+    expected: pass
+    goal: Informar status, item e rastreio do pedido 8; como a previsão passou, perguntar se o cliente quer encaminhar.
+    user: "Qual o status do pedido 8? Meu email é anacarol.ferreira@coldmail.com"
+    reply: "Oi Ana! Seu pedido 8 (1x Kala KA-C Concert Mogno, R$ 349,90) foi enviado. Código de rastreio: BRJL5544332BR, dá pra acompanhar no site dos Correios ou da Jadlog. A previsão de entrega era 28/02/2026 e já passou, peço desculpas! Quer que eu encaminhe o caso para a equipe verificar com a transportadora?"
+    tool_data: 'get_order_status: {"status":"ok","order":{"order_id":8,"status":"enviado","items":["1x Kala KA-C Concert Mogno"],"total":"R$ 349,90","tracking_code":"BRJL5544332BR","estimated_delivery":"28/02/2026","notes":["A previsão de entrega (28/02/2026) já passou. Primeiro informe o status e o código de rastreio; depois peça desculpas e PERGUNTE se o cliente quer que você encaminhe o caso para a equipe verificar com a transportadora."]}}'

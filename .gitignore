@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Ambiente
+.env
+
+# Enunciado do desafio (documento do processo seletivo, não versionar)
+desafio_tecnico_ai_eng_artefact.pdf
+
+# Artefatos gerados pelo pipeline de dados (reproduzíveis via `uv run emporio-clean-data`)
+data/processed/*
+!data/processed/data_quality_report.md
+
+# Estado de execução (conversas e atendimentos encaminhados; contém dados pessoais)
+var/
+
+# IDE
+.vscode/
+.idea/
