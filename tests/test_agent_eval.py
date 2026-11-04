@@ -145,3 +145,28 @@ def test_summarize() -> None:
 
 def test_scenario_now_is_timezone_naive_and_parsed() -> None:
     assert all(isinstance(s.now, datetime) for s in load_scenarios())
+
+
+def test_rescore_reapplies_current_expectations(tmp_path: Path) -> None:
+    """Respostas gravadas são reavaliadas sem chamar o modelo (ex.: '4 vezes' agora vale como '4x')."""
+    import json
+
+    from emporio.evals.agent_eval import rescore
+
+    details = [{
+        "id": "parcelamento_por_valor", "category": "pagamento", "judge": None, "error": None,
+        "turns": [{
+            "user": "u", "reply": "Dá pra parcelar em até 4 vezes sem juros de R$ 87,48.",
+            "tools": ["payment_options"], "tool_outputs": [["payment_options", "{}"]],
+            "failures": ["faltou '4x'"], "tools_ok": True, "latency_s": 1.0,
+            "input_tokens": 1, "output_tokens": 1, "cost_usd": 0.0, "model": "m",
+        }],
+    }]
+    path = tmp_path / "details.json"
+    path.write_text(json.dumps(details), encoding="utf-8")
+    (result,) = rescore(path)
+    assert result.checks_passed and result.turns[0].failures == []
+
+
+def test_unicode_dashes_are_normalized() -> None:
+    assert check_turn(Expect(contains=["3341-4444"]), reply("WhatsApp (67) 3341‑4444")) == []
