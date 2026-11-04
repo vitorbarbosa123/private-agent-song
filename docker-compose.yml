@@ -1,5 +1,5 @@
 # Uso:
-#   docker compose up --build                       # interface web em http://localhost:8501
+#   docker compose up --build                       # web em http://localhost:8501 e API em :8710/docs
 #   docker compose run --rm chat                    # chat no terminal
 #   docker compose run --rm chat --now 2026-03-02T10:30 --debug
 #   docker compose run --rm tests                   # testes (não precisam de chave de API)
@@ -34,6 +34,23 @@ services:
     <<: *app
     ports:
       - "8501:8501"
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    entrypoint: ["emporio-api"]
+    environment:
+      EMPORIO_STATE_DIR: /app/var
+      LANGFUSE_HOST: ${LANGFUSE_DOCKER_HOST:-http://langfuse-web:3000}
+      EMPORIO_API_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${EMPORIO_API_PORT:-8710}:8000"   # só localhost; porta configurável
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     restart: unless-stopped
 
   chat:

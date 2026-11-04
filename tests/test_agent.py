@@ -88,7 +88,7 @@ def test_tool_call_then_answer(make_agent) -> None:
     assert "R$ 2.199,00" in reply.tool_calls[0].output  # resultado real da ferramenta
 
     first_call, second_call = model.received
-    assert isinstance(first_call[0], SystemMessage) and "02/03/2026" in first_call[0].content
+    assert isinstance(first_call[0], SystemMessage) and "02/03/2026" in first_call[0].text
     assert isinstance(second_call[-1], ToolMessage)  # o modelo recebeu o resultado
 
 
@@ -195,3 +195,32 @@ def test_prompt_closed_store() -> None:
 def test_prompt_holiday() -> None:
     prompt = build_system_prompt(datetime(2026, 4, 3, 11, 0, tzinfo=STORE_TZ))
     assert "feriado: Sexta-feira Santa" in prompt
+
+
+# --- Cache de prompt -----------------------------------------------------------------------
+
+
+def test_static_prompt_has_no_date_and_is_stable() -> None:
+    from emporio.agent.prompts import static_prompt
+
+    assert "02/03/2026" not in static_prompt() and "ABERTA" not in static_prompt()
+    assert static_prompt() == static_prompt()  # idêntico entre mensagens: pré-requisito do cache
+
+
+def test_cached_system_prompt_marks_only_static_part() -> None:
+    from emporio.agent.graph import system_prompt_for_turn
+
+    message = system_prompt_for_turn(NOW, ["aviso do turno"], cache=True)
+    static, dynamic = message.content
+    assert static["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in dynamic
+    assert "02/03/2026" in dynamic["text"] and "aviso do turno" in dynamic["text"]
+    plain = system_prompt_for_turn(NOW, [], cache=False)
+    assert isinstance(plain.content, str) and "02/03/2026" in plain.content
+
+
+def test_cache_can_be_disabled(make_agent) -> None:
+    agent, model = make_agent(AIMessage("Oi!"))
+    agent.settings = agent.settings.model_copy(update={"llm_prompt_cache": False})
+    agent.new_session().send("Oi")
+    assert isinstance(model.received[0][0].content, str)

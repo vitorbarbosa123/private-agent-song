@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Limite de tokens da resposta. Sem ele, o OpenRouter reserva crédito para o máximo do
     # modelo (ex.: 16k) e recusa a chamada (402) em chaves com limite de crédito baixo.
     llm_max_tokens: int = Field(default=1024, validation_alias="LLM_MAX_TOKENS")
+    # Marca a parte fixa do system prompt para cache do provedor (Anthropic/Gemini via
+    # OpenRouter): reduz custo e latência dos tokens repetidos a cada mensagem.
+    llm_prompt_cache: bool = Field(default=True, validation_alias="LLM_PROMPT_CACHE")
     llm_timeout_seconds: float = Field(default=60.0, validation_alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=2, validation_alias="LLM_MAX_RETRIES")
 
