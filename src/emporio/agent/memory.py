@@ -33,6 +33,13 @@ class SessionInfo:
     thread_id: str
     updated_at: datetime
     messages: int
+    title: str = ""  # primeira mensagem do cliente, para listar conversas
+
+
+def _title(messages: list) -> str:
+    first = next((m for m in messages if getattr(m, "type", "") == "human"), None)
+    text = " ".join(str(first.content).split()) if first else ""
+    return text if len(text) <= 48 else text[:47] + "…"
 
 
 def list_sessions(saver: BaseCheckpointSaver, limit: int = 20) -> list[SessionInfo]:
@@ -43,6 +50,8 @@ def list_sessions(saver: BaseCheckpointSaver, limit: int = 20) -> list[SessionIn
         updated = datetime.fromisoformat(item.checkpoint["ts"]).astimezone(STORE_TZ)
         if thread_id in latest and latest[thread_id].updated_at >= updated:
             continue
-        messages = len(item.checkpoint["channel_values"].get("messages", []))
-        latest[thread_id] = SessionInfo(thread_id, updated, messages)
+        messages = item.checkpoint["channel_values"].get("messages", [])
+        if not messages:
+            continue
+        latest[thread_id] = SessionInfo(thread_id, updated, len(messages), _title(messages))
     return sorted(latest.values(), key=lambda s: s.updated_at, reverse=True)[:limit]
