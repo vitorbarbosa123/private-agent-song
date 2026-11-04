@@ -85,6 +85,7 @@ class AgentReply:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_usd: float | None = None  # custo informado pelo provedor (OpenRouter), se houver
+    model: str | None = None  # modelo que de fato respondeu (com presets/fallbacks pode variar)
 
 
 def turn_usage(messages: list[AnyMessage]) -> tuple[int, int, float | None]:
@@ -260,10 +261,12 @@ class ChatSession:
         final = turn[-1] if turn and isinstance(turn[-1], AIMessage) else None
         text = message_text(final) if final else ""
         usage = turn_usage(turn)
+        served_by = next((m.response_metadata.get("model_name") for m in reversed(turn)
+                          if isinstance(m, AIMessage) and m.response_metadata.get("model_name")), None)
         if not text:
             logger.warning("Resposta vazia do modelo na conversa %s", self.thread_id)
-            return AgentReply(FALLBACK_ERROR, calls, True, *usage)
-        return AgentReply(text, calls, False, *usage)
+            return AgentReply(FALLBACK_ERROR, calls, True, *usage, model=served_by)
+        return AgentReply(text, calls, False, *usage, model=served_by)
 
 
 def create_agent(settings: Settings | None = None, *, persistent: bool = True) -> EmporioAgent:

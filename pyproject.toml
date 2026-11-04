@@ -25,6 +25,7 @@ emporio-eval-retrieval = "emporio.rag.evaluate:main"
 emporio-chat = "emporio.cli:main"
 emporio-handoffs = "emporio.handoff:main"
 emporio-eval-agent = "emporio.evals.agent_eval:main"
+emporio-export-examples = "emporio.evals.examples:main"
 
 [dependency-groups]
 dev = [
