@@ -247,7 +247,9 @@ class ChatSession:
             handoffs=agent.handoffs, session_id=thread_id,
         )
         self.graph = build_graph(agent.model, build_tools(self.tool_context), agent.clock, agent.checkpointer,
-                                 prompt_cache=agent.settings.llm_prompt_cache)
+                                 # cache_control só foi validado via OpenRouter; outros endpoints
+                                 # compatíveis com a OpenAI podem rejeitar blocos no system prompt.
+                                 prompt_cache=agent.settings.llm_prompt_cache and agent.settings.is_openrouter)
 
     @property
     def _config(self) -> dict[str, Any]:
