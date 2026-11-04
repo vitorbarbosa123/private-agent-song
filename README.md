@@ -25,6 +25,7 @@ vaga de AI Engineer na Artefact.
 - [Arquitetura do agente](#arquitetura-do-agente)
 - [Guardrails](#guardrails)
 - [Avaliação do agente](#avaliação-do-agente)
+- [Integração contínua](#integração-contínua)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -522,6 +523,20 @@ definitivo. Com mais tempo, rodaria cada cenário N vezes e reportaria a taxa de
 busca no manual, aqui não há um conjunto separado de validação; por isso parei de iterar na
 última falha em vez de ajustar até 100%. Um próximo passo seria escrever cenários novos (ou
 usar conversas reais) para medir a generalização.
+
+## Integração contínua
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda a cada push e pull
+request, **sem precisar de chave de API**:
+
+| Job | Passos |
+|---|---|
+| `test` | `ruff check` (lint); `pytest` (266 testes, com modelo roteirizado); regenera os dados tratados e exige que o relatório de qualidade versionado esteja idêntico (garante que o pipeline é determinístico e que o relatório não ficou desatualizado); avaliação da busca no conjunto de validação em modo BM25 |
+| `docker` | Build das imagens; testes dentro do container; sobe a interface web e espera o healthcheck |
+
+As avaliações que chamam o modelo (`emporio-eval-agent`, embeddings) ficam fora do CI: custam
+crédito e variam entre execuções. Elas são rodadas sob demanda, e os resultados ficam em
+`evals/results/`.
 
 ## Limitações conhecidas
 
