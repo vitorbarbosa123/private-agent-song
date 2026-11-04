@@ -7,13 +7,14 @@ vaga de AI Engineer na Artefact.
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
 > dados**, **configuração do modelo**, **ferramentas do agente**, **busca no manual (RAG)**,
 > **agente com interface de terminal**, **histórico persistente com encaminhamento para humanos**,
-> **guardrails** e **avaliação de ponta a ponta**. As seções sobre o agente serão preenchidas conforme a
+> **guardrails**, **avaliação de ponta a ponta** e **interface web em containers**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
 
 - [Como rodar](#como-rodar)
-- [Conversando com o agente](#conversando-com-o-agente)
+- [Interface web](#interface-web)
+- [Conversando pelo terminal](#conversando-pelo-terminal)
 - [Modelo de linguagem: como trocar](#modelo-de-linguagem-como-trocar)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Tratamento dos dados](#tratamento-dos-dados)
@@ -29,12 +30,40 @@ vaga de AI Engineer na Artefact.
 
 ## Como rodar
 
+### Com Docker (recomendado)
+
+Pré-requisitos: Docker com Compose v2.
+
+```bash
+cp .env.example .env              # preencha LLM_API_KEY (chave do OpenRouter)
+docker compose up --build         # interface web em http://localhost:8501
+```
+
+Os demais comandos rodam em containers da mesma imagem:
+
+```bash
+docker compose run --rm chat                     # chat no terminal (aceita --now, --debug, --session…)
+docker compose run --rm tests                    # testes (não precisam de chave de API)
+docker compose run --rm llm-check                # confere a configuração do modelo
+docker compose run --rm eval --judge --judge-model google/gemini-2.5-pro   # avaliação do agente
+docker compose run --rm eval-retrieval --dataset holdout                   # avaliação da busca
+docker compose run --rm handoffs                 # painel da equipe no terminal
+```
+
+A imagem gera os dados tratados durante o build (o pipeline é determinístico e não precisa de
+chave). Histórico das conversas e atendimentos ficam no volume `emporio-state`, compartilhado
+entre a interface web e o terminal. O container roda com um usuário sem privilégios, e o `.env`
+nunca entra na imagem: é lido em tempo de execução.
+
+### Localmente, com uv
+
 Pré-requisitos: Python 3.11+ e [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync                    # cria o ambiente virtual e instala as dependências
 cp .env.example .env       # e preencha LLM_API_KEY (chave do OpenRouter)
 uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/processed/
+uv run streamlit run src/emporio/ui/app.py   # interface web
 uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
 uv run emporio-eval-retrieval [--dataset holdout]  # avalia a busca no manual de políticas
 uv run emporio-chat        # conversa com a assistente no terminal
@@ -43,7 +72,27 @@ uv run emporio-handoffs    # painel da equipe: atendimentos encaminhados pela as
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
 
-## Conversando com o agente
+## Interface web
+
+`docker compose up` (ou `uv run streamlit run src/emporio/ui/app.py`) abre a interface em
+http://localhost:8501. Ela segue o modelo dos chats de IA atuais:
+
+- **Conversas na barra lateral,** com título (a primeira pergunta). Dá para criar uma nova,
+  retomar qualquer conversa anterior e apagar a atual (direito de exclusão, LGPD).
+- **Histórico persistente** no mesmo SQLite usado pelo terminal.
+- **Ferramentas chamadas em cada resposta:** um painel expansível mostra quais ferramentas a
+  assistente usou, com os parâmetros enviados e o resultado recebido. Facilita entender e
+  auditar as decisões do agente. Pode ser desligado na barra lateral.
+- **Sugestões iniciais** com as quatro perguntas do enunciado.
+- **Simulação de data e hora,** útil porque os pedidos da base são de 2025-2026 (ex.: testar o
+  prazo de devolução ou a loja fechada no domingo).
+- **Página "Atendimentos":** a equipe vê e encerra os casos encaminhados pela assistente.
+
+A interface foi testada de ponta a ponta com o `AppTest` do Streamlit dentro do container:
+clique em uma sugestão, resposta real do modelo, painel de ferramentas, conversa na barra lateral
+e um segundo turno usando o contexto ("e em quantas vezes posso pagar *ele*?").
+
+## Conversando pelo terminal
 
 ```bash
 uv run emporio-chat                          # conversa interativa
@@ -116,7 +165,8 @@ data/
                                      # exceto o relatório de qualidade)
 src/emporio/
 ├── config.py · llm.py               # configuração (.env) e fábrica do modelo (OpenRouter)
-├── agent/                           # grafo LangGraph, prompt, memória e verificação de respostas
+├── agent/                           # grafo LangGraph, prompt, memória, histórico e verificação
+├── ui/app.py                        # interface web (Streamlit)
 ├── handoff.py                       # registro de atendimentos encaminhados + painel da equipe
 ├── cli.py                           # interface de terminal (emporio-chat)
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
@@ -134,6 +184,7 @@ src/emporio/
 evals/                               # conjuntos de avaliação (busca, agente, calibração do avaliador)
 │   └── results/agent_eval.md        # último relatório da avaliação do agente
 tests/
+Dockerfile · docker-compose.yml      # imagem (runtime e testes) e serviços
 ```
 
 ## Tratamento dos dados
