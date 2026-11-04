@@ -6,8 +6,8 @@ vaga de AI Engineer na Artefact.
 
 > **Status:** em desenvolvimento. Concluídos: **tratamento dos dados**, **camada de acesso aos
 > dados**, **configuração do modelo**, **ferramentas do agente**, **busca no manual (RAG)**,
-> **agente com interface de terminal**, **histórico persistente com encaminhamento para humanos**
-> e **guardrails**. As seções sobre o agente serão preenchidas conforme a
+> **agente com interface de terminal**, **histórico persistente com encaminhamento para humanos**,
+> **guardrails** e **avaliação de ponta a ponta**. As seções sobre o agente serão preenchidas conforme a
 > implementação avançar.
 
 ## Sumário
@@ -23,6 +23,7 @@ vaga de AI Engineer na Artefact.
 - [Busca no manual de políticas (RAG)](#busca-no-manual-de-políticas-rag)
 - [Arquitetura do agente](#arquitetura-do-agente)
 - [Guardrails](#guardrails)
+- [Avaliação do agente](#avaliação-do-agente)
 - [Limitações conhecidas](#limitações-conhecidas)
 - [Uso de assistentes de código](#uso-de-assistentes-de-código)
 
@@ -37,6 +38,7 @@ uv run emporio-clean-data  # trata os dados brutos e grava os artefatos em data/
 uv run emporio-llm-check   # confere a configuração e faz uma chamada mínima ao modelo
 uv run emporio-eval-retrieval [--dataset holdout]  # avalia a busca no manual de políticas
 uv run emporio-chat        # conversa com a assistente no terminal
+uv run emporio-eval-agent [--judge]  # avaliação de ponta a ponta com 28 conversas de teste
 uv run emporio-handoffs    # painel da equipe: atendimentos encaminhados pela assistente
 uv run pytest              # roda os testes (não fazem chamadas ao modelo)
 ```
@@ -128,7 +130,8 @@ src/emporio/
     ├── categories.py · customers.py · orders.py
     ├── policies.py                  # extração do PDF e divisão em seções
     └── issues.py · utils.py · paths.py
-evals/                               # perguntas de avaliação da busca (dev e holdout)
+evals/                               # conjuntos de avaliação (busca, agente, calibração do avaliador)
+│   └── results/agent_eval.md        # último relatório da avaliação do agente
 tests/
 ```
 
@@ -393,6 +396,76 @@ foram tratados com regras determinísticas, que são baratas, previsíveis e tes
   cliente não a vê.
 - O aviso de "não envie dados de cartão" era ignorado pelo modelo, e por isso passou a ser
   determinístico.
+
+## Avaliação do agente
+
+```bash
+uv run emporio-eval-agent                     # só verificações determinísticas (~US$ 0,30)
+uv run emporio-eval-agent --judge --judge-model google/gemini-2.5-pro   # + avaliador LLM
+uv run emporio-eval-agent --calibrate-judge   # mede o próprio avaliador
+uv run emporio-eval-agent --model <outro>     # compara outro modelo para o agente
+```
+
+São [28 conversas de teste](evals/agent_scenarios.yaml) em 13 categorias: os 4 cenários do
+enunciado, catálogo, preços e promoções, pagamento, frete, pedidos, devoluções, políticas,
+horário, encaminhamento, multi-turno, fora do escopo e segurança. A avaliação tem duas camadas:
+
+1. **Verificações determinísticas por turno.** Ferramentas que devem ou não ser chamadas e
+   trechos obrigatórios ou proibidos na resposta (ex.: "R$ 2.199,00" sim; o número divergente do
+   WhatsApp, não; nada do pedido quando o e-mail não confere). Pegam erros objetivos sem
+   subjetividade.
+2. **Avaliador LLM (LLM-as-judge).** Notas de 1 a 5 para tom, aderência à política e utilidade,
+   com o objetivo do cenário e os dados das ferramentas como referência. Usei um modelo de
+   **outra família** (Gemini) para avaliar o agente (Claude), reduzindo o viés de um modelo
+   favorecer as próprias respostas.
+
+**Resultado final** ([relatório completo](evals/results/agent_eval.md)), com o agente
+`anthropic/claude-haiku-4.5` (via preset) e o avaliador `google/gemini-2.5-pro`:
+
+| Métrica | Resultado |
+|---|---|
+| Verificações determinísticas | 28/28 cenários (100%) |
+| Seleção de ferramentas (por turno) | 100% |
+| Avaliador: tom / política / utilidade (média 1-5) | 5,0 / 4,93 / 4,96 |
+| Cenários aprovados (verificações + todas as notas ≥ 4) | 27/28 (96%) |
+| Latência média por turno | 3,4 s |
+| Custo da execução completa (31 turnos) | ~US$ 0,32 |
+
+**Como chegamos aqui: o que a avaliação revelou.**
+
+- **Primeira execução (26/28 nas verificações).** Uma falha era real: para "vocês entregam em
+  Dourados?", o agente perguntava qual produto em vez de responder, porque a descrição da
+  ferramenta de frete não deixava claro que só a cidade é obrigatória. A outra era do meu
+  cenário: o "cliente" pedia para registrar uma reclamação sem contar o que houve, e pedir
+  detalhes era o comportamento correto. Ajustei o cenário e deixo isso registrado.
+- **O avaliador também precisa ser avaliado.** Na primeira versão, ele reprovou 12 cenários
+  corretos: leu "nunca informar preço que não venha do sistema" como "nunca informar preço". Criei
+  um [conjunto de calibração](evals/judge_calibration.yaml) com 12 respostas de veredito conhecido
+  (preço inventado, PIX somado à promoção, vazamento de dados de pedido, desconto prometido, prazo
+  inventado, tom robótico e respostas boas) e reescrevi o prompt dele até acertar todas. Os dois
+  avaliadores testados acertam 12/12 (`gemini-2.5-flash` e `gemini-2.5-pro`).
+- **Erros meus no contexto do avaliador.** Faltava o endereço da loja nos dados institucionais,
+  os dados das ferramentas eram truncados (as alternativas sugeridas ficavam de fora) e ele não
+  sabia a data da conversa (achou que "amanhã, sábado 04/04" era inventado).
+- **Problemas reais do agente que a avaliação pegou e foram corrigidos:**
+  - informar o status do pedido atrasado em vez de encaminhar direto sem perguntar;
+  - não oferecer "encomendas", que a loja não faz (a orientação tinha vindo de uma nota da
+    minha própria ferramenta);
+  - sugerir um violão clássico de nylon como alternativa a um de aço (as alternativas agora
+    priorizam o mesmo tipo de corda e de eletrônica);
+  - não alertar sobre frete especial para itens grandes fora de Campo Grande;
+  - o aviso de cartão era "satisfeito" por qualquer menção à palavra "cartão" (ex.: "pague no
+    PIX, cartão ou boleto"); agora exige uma orientação explícita.
+
+**Variação entre execuções.** Rodando os mesmos cenários várias vezes, o conjunto de
+reprovações muda (ex.: a falha restante, omitir que o prazo de devolução foi contado pela
+*previsão* de entrega, nem sempre acontece). Um resultado isolado não deve ser lido como
+definitivo. Com mais tempo, rodaria cada cenário N vezes e reportaria a taxa de aprovação.
+
+**Risco de sobreajuste.** Corrigi o agente olhando falhas destes mesmos cenários. Diferente da
+busca no manual, aqui não há um conjunto separado de validação; por isso parei de iterar na
+última falha em vez de ajustar até 100%. Um próximo passo seria escrever cenários novos (ou
+usar conversas reais) para medir a generalização.
 
 ## Limitações conhecidas
 

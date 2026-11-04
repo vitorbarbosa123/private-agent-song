@@ -82,6 +82,24 @@ class AgentReply:
     text: str
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     error: bool = False
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None  # custo informado pelo provedor (OpenRouter), se houver
+
+
+def turn_usage(messages: list[AnyMessage]) -> tuple[int, int, float | None]:
+    """Tokens e custo somados das respostas do modelo neste turno."""
+    tokens_in = tokens_out = 0
+    cost: float | None = None
+    for m in messages:
+        if not isinstance(m, AIMessage):
+            continue
+        if m.usage_metadata:
+            tokens_in += m.usage_metadata.get("input_tokens", 0)
+            tokens_out += m.usage_metadata.get("output_tokens", 0)
+        if (c := (m.response_metadata.get("token_usage") or {}).get("cost")) is not None:
+            cost = (cost or 0.0) + float(c)
+    return tokens_in, tokens_out, cost
 
 
 def recent_history(messages: list[AnyMessage], limit: int = MAX_HISTORY_MESSAGES) -> list[AnyMessage]:
@@ -241,10 +259,11 @@ class ChatSession:
         ]
         final = turn[-1] if turn and isinstance(turn[-1], AIMessage) else None
         text = message_text(final) if final else ""
+        usage = turn_usage(turn)
         if not text:
             logger.warning("Resposta vazia do modelo na conversa %s", self.thread_id)
-            return AgentReply(FALLBACK_ERROR, calls, error=True)
-        return AgentReply(text, calls)
+            return AgentReply(FALLBACK_ERROR, calls, True, *usage)
+        return AgentReply(text, calls, False, *usage)
 
 
 def create_agent(settings: Settings | None = None, *, persistent: bool = True) -> EmporioAgent:

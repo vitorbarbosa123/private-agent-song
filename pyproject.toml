@@ -23,6 +23,7 @@ emporio-llm-check = "emporio.llm:main"
 emporio-eval-retrieval = "emporio.rag.evaluate:main"
 emporio-chat = "emporio.cli:main"
 emporio-handoffs = "emporio.handoff:main"
+emporio-eval-agent = "emporio.evals.agent_eval:main"
 
 [dependency-groups]
 dev = [

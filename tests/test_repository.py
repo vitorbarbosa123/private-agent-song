@@ -140,6 +140,9 @@ def test_alternatives_for_out_of_stock(repo: StoreRepository) -> None:
     assert len(alternatives) == 3
     assert all(a.is_sellable and a.category_id == original.category_id for a in alternatives)
     assert original.product_id not in {a.product_id for a in alternatives}
+    # GF-3D é de aço e sem eletrônica: alternativas de nylon não devem aparecer antes.
+    assert all(a.specs.get("string_type") == "aço" for a in alternatives)
+    assert all(a.specs.get("electronics") is False for a in alternatives)
 
 
 def test_conflicting_description_is_not_exposed(repo: StoreRepository) -> None:

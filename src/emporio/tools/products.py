@@ -156,8 +156,8 @@ def search_products(ctx: ToolContext, args: SearchProductsInput) -> SearchProduc
         category_id = category.category_id
         if category.sellable_count == 0 and not args.include_unavailable:
             notes.append(
-                f"No momento não há produtos disponíveis na categoria '{category.name}'. Ofereça "
-                "contato com a equipe para encomendas."
+                f"No momento não há produtos disponíveis na categoria '{category.name}'. Não invente "
+                "prazos de chegada; se o cliente quiser, ofereça o contato com a equipe."
             )
 
     filters = dict(

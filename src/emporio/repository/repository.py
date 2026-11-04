@@ -224,13 +224,20 @@ class StoreRepository:
         return [ProductMatch(product=_to_product(r), score=s) for s, r in scored[:limit]]
 
     def find_alternatives(self, product: Product, *, limit: int = 3) -> list[Product]:
-        """Produtos disponíveis da mesma categoria com preço mais próximo (manual 7.3)."""
+        """Produtos disponíveis da mesma categoria (manual 7.3), priorizando o mesmo tipo de
+        corda e de eletrônica (um violão de aço não substitui um clássico de nylon) e, depois,
+        o preço mais próximo."""
+        string_type = product.specs.get("string_type")
+        electronics = product.specs.get("electronics")
         rows = self._conn.execute(
             f"""{_PRODUCT_SELECT}
             WHERE p.category_id = ? AND p.product_id != ? AND p.is_sellable = 1
-            ORDER BY ABS(COALESCE(p.promotion_price_brl, p.price_brl) - ?)
+            ORDER BY (json_extract(p.specs, '$.string_type') IS NOT ?),
+                     (json_extract(p.specs, '$.electronics') IS NOT ?),
+                     ABS(COALESCE(p.promotion_price_brl, p.price_brl) - ?)
             LIMIT ?""",
-            (product.category_id, product.product_id, product.price.current_price_brl, limit),
+            (product.category_id, product.product_id, string_type,
+             None if electronics is None else int(electronics), product.price.current_price_brl, limit),
         ).fetchall()
         return [_to_product(r) for r in rows]
 

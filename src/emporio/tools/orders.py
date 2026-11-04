@@ -96,8 +96,9 @@ def order_view(order: Order, today: date) -> OrderView:
         tracking_info = "Rastreie no site dos Correios ou da Jadlog com o código informado."
         if order.estimated_delivery and today > order.estimated_delivery:
             notes.append(
-                f"A previsão de entrega ({br_date(order.estimated_delivery)}) já passou. Peça desculpas "
-                "e ofereça encaminhar o caso para a equipe verificar com a transportadora."
+                f"A previsão de entrega ({br_date(order.estimated_delivery)}) já passou. Primeiro informe "
+                "o status e o código de rastreio; depois peça desculpas e PERGUNTE se o cliente quer que "
+                "você encaminhe o caso para a equipe verificar com a transportadora."
             )
     elif order.status == "cancelled":
         notes.append(f"Motivo do cancelamento: {order.notes}" if order.notes else "Pedido cancelado.")
@@ -225,9 +226,10 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
             if result.eligible:
                 result.decision = f"Dentro do prazo de {limit} dias corridos do direito de arrependimento."
                 result.next_steps = [
-                    "O frete de devolução é por conta da loja.",
-                    "Reembolso na mesma forma de pagamento, em até 10 dias úteis após a devolução.",
-                    "Encaminhar para um atendente gerar a autorização de devolução.",
+                    "Informe ao cliente o prazo, as condições, que o frete de devolução é por conta da "
+                    "loja e que o reembolso sai na mesma forma de pagamento em até 10 dias úteis.",
+                    "Depois PERGUNTE se ele quer que você encaminhe à equipe (escalate_to_human) para "
+                    "gerar a autorização de devolução.",
                 ]
                 result.requires_human = True
             else:
@@ -239,8 +241,9 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
                                      "são cobradas ou reembolsadas.")
             if result.eligible:
                 result.decision = f"Dentro do prazo de {limit} dias para troca por preferência."
-                result.next_steps = ["Verificar a disponibilidade do produto desejado.",
-                                     "Encaminhar para um atendente concluir a troca."]
+                result.next_steps = ["Verifique a disponibilidade do produto desejado.",
+                                     "Informe prazo e condições e PERGUNTE se o cliente quer que você "
+                                     "encaminhe à equipe (escalate_to_human) para concluir a troca."]
                 result.requires_human = True
             else:
                 result.decision = f"O prazo de {limit} dias para troca por preferência terminou em {br_date(deadline)}."
@@ -274,7 +277,8 @@ def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> 
         result.decision = ("Fora da garantia legal. Verifique a garantia do fabricante (de 6 meses a 2 "
                            "anos, conforme o certificado do produto); a loja pode intermediar.")
     result.next_steps = [
-        "Pedir fotos ou vídeo do defeito.",
-        "Registrar o caso com escalate_to_human (reason='defeito'), incluindo este resultado no resumo.",
+        "Informe a situação (prazo e cobertura) e peça fotos ou vídeo do defeito.",
+        "Com a concordância do cliente, registre com escalate_to_human (reason='defeito'), "
+        "incluindo este resultado no resumo.",
     ]
     return result

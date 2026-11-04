@@ -74,8 +74,9 @@ _SPECS: tuple[tuple[str, ToolFn, type[BaseModel], str], ...] = (
         "shipping_quote",
         commerce.shipping_quote,
         commerce.ShippingQuoteInput,
-        "Informa regras de frete e prazo de entrega para uma cidade, com o valor quando a entrega é "
-        "em Campo Grande. Para outras cidades, informa transportadoras e prazos (valor só no checkout).",
+        "Informa se a loja entrega numa cidade, por qual transportadora, o prazo e o valor quando a "
+        "entrega é em Campo Grande. Só a cidade é obrigatória: para 'vocês entregam em X?', chame já, "
+        "sem perguntar o produto antes. Passe product_ids quando souber (frete especial para itens grandes).",
     ),
     (
         "search_policies",
