@@ -105,10 +105,13 @@ def test_legitimate_messages_are_not_flagged(text: str) -> None:
 
 
 def test_amounts_in_parses_brazilian_formats() -> None:
-    assert amounts_in("R$ 2.199,00, R$2199, R$ 1.000 e R$ 35") == {Decimal("2199.00"), Decimal("1000.00"), Decimal("35.00")}
+    expected = {Decimal("2199.00"), Decimal("1000.00"), Decimal("35.00")}
+    assert amounts_in("R$ 2.199,00, R$2199, R$ 1.000 e R$ 35") == expected
 
 
-TOOL = ToolMessage('{"list_price":"R$ 2.199,00","pix_price":"R$ 2.089,05"}', tool_call_id="t", name="get_product_details")
+TOOL = ToolMessage(
+    '{"list_price":"R$ 2.199,00","pix_price":"R$ 2.089,05"}', tool_call_id="t", name="get_product_details"
+)
 
 
 @pytest.mark.parametrize(

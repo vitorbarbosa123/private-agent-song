@@ -20,7 +20,7 @@ from pathlib import Path
 from emporio.config import Settings, get_settings
 from emporio.data.paths import PROJECT_ROOT
 from emporio.rag.embeddings import CachedEmbedder, OpenAICompatibleEmbedder
-from emporio.rag.retriever import Mode, PolicyRetriever, load_chunks
+from emporio.rag.retriever import PolicyRetriever, load_chunks
 
 DATASET = PROJECT_ROOT / "evals" / "policy_retrieval.json"
 # Validação: paráfrases escritas antes de qualquer ajuste e nunca usadas para calibrar a busca.
@@ -79,7 +79,8 @@ def main(argv: list[str] | None = None) -> None:
     if settings.embedding_model and settings.llm_api_key:
         embedder = CachedEmbedder(OpenAICompatibleEmbedder(settings), sections.parent / "policy_embeddings.json")
 
-    print(f"[{args.dataset}] {len(cases)} perguntas · {len(chunks)} seções · embeddings: {settings.embedding_model or '-'}\n")
+    model_name = settings.embedding_model or "-"
+    print(f"[{args.dataset}] {len(cases)} perguntas · {len(chunks)} seções · embeddings: {model_name}\n")
     print(f"{'modo':<12}{'hit@1':>8}{'hit@3':>8}{'MRR':>8}")
     all_misses = {}
     for mode in args.modes.split(","):

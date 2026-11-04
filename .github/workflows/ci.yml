@@ -1,0 +1,84 @@
+# Integração contínua. Nenhum passo precisa de chave de API: os testes usam um modelo
+# roteirizado e a avaliação da busca roda em modo BM25 (sem rede).
+name: CI
+
+on:
+  push:
+    branches: [master, main, "feat/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint, testes e dados
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar dependências
+        run: uv sync --frozen --python 3.13
+
+      - name: Lint (ruff)
+        run: uv run ruff check
+
+      - name: Testes
+        run: uv run pytest -q
+
+      - name: Pipeline de dados é determinístico
+        # Regenera os dados tratados e exige que o relatório versionado esteja atualizado.
+        run: |
+          uv run emporio-clean-data
+          git diff --exit-code data/processed/data_quality_report.md
+
+      - name: Avaliação da busca no manual (BM25, sem rede)
+        env:
+          EMBEDDING_MODEL: ""
+        run: uv run emporio-eval-retrieval --modes bm25 --dataset holdout
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build das imagens (runtime e testes)
+        run: docker compose build web tests
+
+      - name: Testes dentro do container
+        run: docker compose run --rm tests
+
+      - name: Interface web sobe e responde
+        run: |
+          docker compose up -d web
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q web)")
+            [ "$status" = "healthy" ] && break
+            sleep 2
+          done
+          echo "status: $status"
+          curl --fail --silent http://localhost:8501/_stcore/health
+          [ "$status" = "healthy" ]
+
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose logs web
+
+      - name: Encerrar
+        if: always()
+        run: docker compose down -v

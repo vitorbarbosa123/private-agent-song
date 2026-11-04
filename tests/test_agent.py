@@ -6,9 +6,9 @@ ferramentas, o repositório e a busca no manual são os reais.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from pathlib import Path
-import uuid
 from typing import Any
 
 import pytest
@@ -42,7 +42,9 @@ class ScriptedChatModel(BaseChatModel):
     def bind_tools(self, tools: Any, **kwargs: Any) -> ScriptedChatModel:
         return self
 
-    def _generate(self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any) -> ChatResult:
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
         self.received.append(list(messages))
         response = self.responses[0] if self.repeat_last and len(self.responses) == 1 else self.responses.pop(0)
         if isinstance(response, Exception):

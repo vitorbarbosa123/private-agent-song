@@ -376,6 +376,8 @@ def summarize(results: list[ScenarioResult]) -> Summary:
 
 def render_report(results: list[ScenarioResult], summary: Summary, model: str, judge_model: str | None) -> str:
     pct = lambda a, b: f"{a}/{b} ({a / b:.0%})" if b else "-"  # noqa: E731
+    judged = " + avaliador" if judge_model else ""
+    tool_accuracy = f"{summary.tool_accuracy:.0%}" if summary.tool_accuracy is not None else "-"
     lines = [
         "# Avaliação de ponta a ponta do agente",
         "",
@@ -385,14 +387,16 @@ def render_report(results: list[ScenarioResult], summary: Summary, model: str, j
         "",
         "| Métrica | Resultado |",
         "|---|---|",
-        f"| Cenários aprovados (verificações{' + avaliador' if judge_model else ''}) | {pct(summary.passed, summary.scenarios)} |",
+        f"| Cenários aprovados (verificações{judged}) | {pct(summary.passed, summary.scenarios)} |",
         f"| Cenários aprovados só nas verificações determinísticas | {pct(summary.checks_passed, summary.scenarios)} |",
-        f"| Acerto na seleção de ferramentas (por turno) | {f'{summary.tool_accuracy:.0%}' if summary.tool_accuracy is not None else '-'} |",
+        f"| Acerto na seleção de ferramentas (por turno) | {tool_accuracy} |",
     ]
     if summary.judge_means:
         m = summary.judge_means
-        lines.append(f"| Avaliador LLM: tom / política / utilidade (média, 1-5) | {m['tone']} / {m['policy_adherence']} / {m['helpfulness']} |")
-        lines.append(f"| Avaliador LLM: cenários com todas as notas ≥ {JUDGE_PASS_SCORE} | {pct(summary.judge_passed or 0, summary.scenarios)} |")
+        means = f"{m['tone']} / {m['policy_adherence']} / {m['helpfulness']}"
+        lines.append(f"| Avaliador LLM: tom / política / utilidade (média, 1-5) | {means} |")
+        judge_ok = pct(summary.judge_passed or 0, summary.scenarios)
+        lines.append(f"| Avaliador LLM: cenários com todas as notas ≥ {JUDGE_PASS_SCORE} | {judge_ok} |")
     lines += [
         f"| Turnos | {summary.turns} |",
         f"| Latência média por turno | {summary.mean_latency_s:.1f} s |",
@@ -467,7 +471,8 @@ def main(argv: list[str] | None = None) -> None:
             hits += got == case.expected
             mark = "[green]✔[/green]" if got == case.expected else "[red]✘[/red]"
             scores = f"{verdict.tone}/{verdict.policy_adherence}/{verdict.helpfulness}"
-            console.print(f"{mark} {case.id:<30} esperado {case.expected} · obtido {got} ({scores}) [dim]{verdict.issues[:120]}[/dim]")
+            console.print(f"{mark} {case.id:<30} esperado {case.expected} · obtido {got} ({scores}) "
+                          f"[dim]{verdict.issues[:120]}[/dim]")
         console.print(f"\n[bold]Avaliador {judge_model}: {hits}/{len(results_cal)} vereditos corretos[/bold]")
         return
 

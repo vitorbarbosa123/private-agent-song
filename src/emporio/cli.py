@@ -21,11 +21,11 @@ import json
 import logging
 from datetime import datetime
 
+from langchain_core.messages import AIMessage, HumanMessage
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
-from langchain_core.messages import AIMessage, HumanMessage
 from rich.prompt import Prompt
 
 from emporio.agent import AgentReply, ChatSession, EmporioAgent, create_agent
