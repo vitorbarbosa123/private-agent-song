@@ -1,6 +1,6 @@
 # Avaliação de ponta a ponta do agente
 
-Gerado por `uv run emporio-eval-agent --judge` em 03/11/2026 20:15. Modelo: `@preset/emporio-agent` · avaliador: `google/gemini-2.5-pro`.
+Gerado por `uv run emporio-eval-agent --judge` em 03/11/2026 20:54. Modelo: `@preset/emporio-agent` · avaliador: `google/gemini-2.5-pro`. Verificações determinísticas reaplicadas com `--rescore` às respostas gravadas.
 
 | Métrica | Resultado |
 |---|---|

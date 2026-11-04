@@ -538,6 +538,39 @@ horário, encaminhamento, multi-turno, fora do escopo e segurança. A avaliaçã
   - o aviso de cartão era "satisfeito" por qualquer menção à palavra "cartão" (ex.: "pague no
     PIX, cartão ou boleto"); agora exige uma orientação explícita.
 
+### Comparação de modelos
+
+Como o modelo é trocável por configuração, a mesma avaliação foi rodada com outros modelos do
+OpenRouter que suportam ferramentas com a política de retenção zero de dados do workspace. O
+avaliador é o mesmo para todos (`google/gemini-2.5-pro`, calibrado). Relatórios em
+[`evals/results/models/`](evals/results/models/).
+
+| Modelo do agente | Aprovados | Verificações determinísticas | Tom / política / utilidade | Latência média | Custo (28 cenários) |
+|---|---:|---:|---|---:|---:|
+| `anthropic/claude-haiku-4.5` (preset atual) | 27/28 | 28/28 | 5,0 / 4,93 / 4,96 | 3,6 s | US$ 0,326 |
+| `google/gemini-2.5-flash` | **28/28** | 28/28 | 5,0 / 5,0 / 4,89 | **2,3 s** | **US$ 0,029** |
+| `openai/gpt-oss-120b` (pesos abertos) | 26/28 | 26/28 | 4,96 / 4,79 / 4,79 | 9,2 s | US$ 0,005 |
+
+**Leitura.**
+
+- O **Gemini 2.5 Flash** empatou ou superou o Haiku com **11 vezes menos custo** e
+  latência menor. As respostas dele são mais curtas (utilidade 4,89), o que combina com o tom de
+  WhatsApp, mas detalha menos.
+- O **gpt-oss-120b** é barato e de pesos abertos (poderia rodar na infraestrutura da loja), mas
+  é lento e teve duas falhas reais: escreveu um valor no formato americano ("R$ 1,000"), que a
+  verificação de preços barrou, e omitiu as transportadoras para Dourados.
+- **Ressalva:** o avaliador é da mesma família do Gemini Flash e pode favorecê-lo. A checagem
+  cruzada (reavaliar as respostas gravadas do Flash com um avaliador Claude, via `--rescore
+  --judge`) e a execução do `claude-sonnet-4.5` ficaram pendentes: o limite diário de gastos do
+  workspace no OpenRouter foi atingido durante a comparação. Por isso o preset continua no Haiku;
+  se a checagem cruzada confirmar o resultado, trocar para o Flash é só mudar o preset, sem código.
+
+**Verificações rígidas demais.** A comparação revelou falsos negativos nas minhas expectativas:
+"até 4 vezes" não casava com "4x", "abrimos amanhã" (num domingo) não casava com "segunda", "só
+vendemos instrumentos" não casava com "acessório", e "3341‑4444" escrito com hífen Unicode
+(U+2011) não casava com o hífen comum. Corrigi os cenários e a normalização, e reavaliei as
+respostas gravadas com `--rescore`, que reaplica as verificações sem chamar o agente de novo.
+
 **Variação entre execuções.** Rodando os mesmos cenários várias vezes, o conjunto de
 reprovações muda (ex.: a falha restante, omitir que o prazo de devolução foi contado pela
 *previsão* de entrega, nem sempre acontece). Um resultado isolado não deve ser lido como
