@@ -31,8 +31,9 @@ class OrderCredentials(BaseModel):
 def _authenticate(ctx: ToolContext, creds: OrderCredentials) -> tuple[AuthStatus, Order | None, str]:
     if ctx.auth_locked:
         return "blocked", None, (
-            "Limite de tentativas de verificação atingido nesta conversa. Não tente novamente: "
-            "encaminhe o cliente para um atendente humano."
+            "Limite de tentativas de verificação atingido nesta conversa. Não tente novamente. "
+            "Ofereça registrar o caso para a equipe verificar com escalate_to_human (peça nome e "
+            "um telefone ou e-mail para retorno)."
         )
     if not creds.email and not creds.phone:
         return "verification_required", None, (
@@ -46,7 +47,9 @@ def _authenticate(ctx: ToolContext, creds: OrderCredentials) -> tuple[AuthStatus
         return "not_verified", None, (
             "Não foi possível localizar um pedido com esse número e esses dados. Peça ao cliente "
             f"para conferir o número do pedido e o contato cadastrado ({left} tentativa(s) restante(s)). "
-            "Não diga se o pedido existe."
+            "Não diga se o pedido existe. Se o cliente não tiver esses dados em mãos ou estiver "
+            "relatando defeito ou reclamação, ofereça também registrar o caso para a equipe com "
+            "escalate_to_human (peça nome e contato; no resumo, cite só o número que ele informou)."
         )
     return "ok", order, ""
 
@@ -167,7 +170,9 @@ class ReturnEligibilityResult(BaseModel):
 def check_return_eligibility(ctx: ToolContext, args: ReturnEligibilityInput) -> ReturnEligibilityResult:
     status, order, message = _authenticate(ctx, args)
     if order is None:
-        return ReturnEligibilityResult(status=status, message=message)
+        # Defeito não pode ficar sem saída por falta de dados do pedido: a equipe resolve.
+        needs_human = status == "blocked" or (status == "not_verified" and args.reason == "defeito")
+        return ReturnEligibilityResult(status=status, message=message, requires_human=needs_human)
 
     today = ctx.clock().date()
     result = ReturnEligibilityResult(status="ok", policy_sections=["4"])

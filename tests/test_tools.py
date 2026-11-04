@@ -258,6 +258,23 @@ def test_returns_by_order_state(ctx: ToolContext) -> None:
     assert cancelled.eligible is False
 
 
+def test_unverified_defect_offers_human_handoff(ctx: ToolContext) -> None:
+    """Achado em teste manual: pedido inexistente numa reclamação de defeito não pode ficar sem saída."""
+    result = _returns(ctx, "defeito", creds={"order_id": 1234356, "email": "cliente@email.com"})
+    assert result.status == "not_verified" and result.requires_human
+    assert "escalate_to_human" in result.message and "existe" in result.message
+    regret = _returns(ctx, "arrependimento", creds={"order_id": 1234356, "email": "cliente@email.com"})
+    assert not regret.requires_human  # aqui o caminho é conferir os dados
+
+
+def test_blocked_verification_points_to_handoff(ctx: ToolContext) -> None:
+    for i in range(3):
+        _returns(ctx, "arrependimento", creds={"order_id": 8, "email": f"x{i}@y.com"})
+    result = _returns(ctx, "arrependimento", creds=ANA)
+    assert result.status == "blocked" and result.requires_human
+    assert "escalate_to_human" in result.message
+
+
 def test_returns_require_verification(ctx: ToolContext) -> None:
     result = _returns(ctx, "arrependimento", creds={"order_id": 7})
     assert result.status == "verification_required" and result.eligible is None

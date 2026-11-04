@@ -219,6 +219,13 @@ def test_cached_system_prompt_marks_only_static_part() -> None:
     assert isinstance(plain.content, str) and "02/03/2026" in plain.content
 
 
+def test_cache_only_for_openrouter(make_agent) -> None:
+    agent, model = make_agent(AIMessage("Oi!"))
+    agent.settings = agent.settings.model_copy(update={"llm_base_url": "https://api.anthropic.com/v1/"})
+    agent.new_session().send("Oi")
+    assert isinstance(model.received[0][0].content, str)  # sem blocos com cache_control
+
+
 def test_cache_can_be_disabled(make_agent) -> None:
     agent, model = make_agent(AIMessage("Oi!"))
     agent.settings = agent.settings.model_copy(update={"llm_prompt_cache": False})
