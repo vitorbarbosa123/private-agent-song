@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import threading
 from pathlib import Path
 from typing import Protocol
 
@@ -51,6 +52,7 @@ class CachedEmbedder:
         self.model = inner.model
         self.cache_path = cache_path
         self._cache: dict[str, Vector] = {}
+        self._lock = threading.Lock()
         if cache_path and cache_path.exists():
             self._cache = json.loads(cache_path.read_text(encoding="utf-8"))
 
@@ -58,14 +60,15 @@ class CachedEmbedder:
         return hashlib.sha256(f"{self.model}\n{text}".encode()).hexdigest()
 
     def embed(self, texts: list[str]) -> list[Vector]:
-        missing = [t for t in dict.fromkeys(texts) if self._key(t) not in self._cache]
-        if missing:
-            for text, vector in zip(missing, self.inner.embed(missing), strict=True):
-                self._cache[self._key(text)] = vector
-            if self.cache_path:
-                self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-                self.cache_path.write_text(json.dumps(self._cache), encoding="utf-8")
-        return [self._cache[self._key(t)] for t in texts]
+        with self._lock:  # conversas em paralelo compartilham o cache e o arquivo
+            missing = [t for t in dict.fromkeys(texts) if self._key(t) not in self._cache]
+            if missing:
+                for text, vector in zip(missing, self.inner.embed(missing), strict=True):
+                    self._cache[self._key(text)] = vector
+                if self.cache_path:
+                    self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.cache_path.write_text(json.dumps(self._cache), encoding="utf-8")
+            return [self._cache[self._key(t)] for t in texts]
 
 
 def cosine(a: Vector, b: Vector) -> float:
