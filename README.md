@@ -16,6 +16,7 @@ vaga de AI Engineer na Artefact.
 - [Conversas de exemplo](#conversas-de-exemplo)
 - [Interface web](#interface-web)
 - [Conversando pelo terminal](#conversando-pelo-terminal)
+- [API REST](#api-rest)
 - [Modelo de linguagem: como trocar](#modelo-de-linguagem-como-trocar)
 - [Estrutura do projeto](#estrutura-do-projeto)
 - [Tratamento dos dados](#tratamento-dos-dados)
@@ -39,7 +40,7 @@ Pré-requisitos: Docker com Compose v2.
 
 ```bash
 cp .env.example .env              # preencha LLM_API_KEY (chave do OpenRouter)
-docker compose up --build         # interface web em http://localhost:8501
+docker compose up --build         # web em http://localhost:8501 e API em http://localhost:8710/docs
 ```
 
 Os demais comandos rodam em containers da mesma imagem:
@@ -167,6 +168,8 @@ LLM_MODEL=@preset/emporio-agent         # volta ao preset padrão
 | `RETRIEVAL_MODE` | `embeddings`, `hybrid` ou `bm25` | `embeddings` |
 | `EMPORIO_STATE_DIR` | Onde ficam o histórico das conversas e os atendimentos encaminhados (SQLite) | `var/` |
 | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_HOST` | Ativam o rastreamento no Langfuse (ver [Observabilidade](#observabilidade-langfuse)) | desligado |
+| `LLM_PROMPT_CACHE` | Marca a parte fixa do system prompt para cache do provedor | `true` |
+| `EMPORIO_API_KEY` | Se definida, a API REST exige o cabeçalho `X-API-Key` | sem autenticação |
 | `EMPORIO_NOW` | Fixa a data e hora vistas pelo agente (ex.: `2026-03-02T10:30`), para demonstrações reproduzíveis | relógio real |
 
 Exemplo com modelo local, sem chave: `LLM_BASE_URL=http://localhost:11434/v1` e
@@ -196,6 +199,8 @@ src/emporio/
 ├── ui/app.py                        # interface web (Streamlit)
 ├── handoff.py                       # registro de atendimentos encaminhados + painel da equipe
 ├── cli.py                           # interface de terminal (emporio-chat)
+├── api.py                           # API REST (FastAPI)
+├── observability.py · privacy.py    # rastreamento no Langfuse e mascaramento de dados
 ├── policy_rules.py                  # regras de negócio canônicas + conflitos resolvidos do manual
 ├── business_hours.py                # relógio da loja, horário de funcionamento e feriados
 ├── repository/                      # consultas fixas, somente leitura, sobre o SQLite tratado
@@ -389,6 +394,32 @@ com pesos iguais no RRF, o BM25 puxa o resultado para baixo. Por isso:
 (`data/processed/policy_embeddings.json`, indexado por modelo + hash do texto). Cada pergunta do
 cliente gera uma chamada de embedding, de custo desprezível (~US$ 0,000001).
 
+## API REST
+
+`docker compose up` também sobe uma API (FastAPI) em http://localhost:8710, com documentação
+interativa em `/docs`. Ela é a porta de integração com canais reais (WhatsApp Business, site, CRM)
+e usa as mesmas conversas e atendimentos da interface web e do terminal.
+
+| Endpoint | Função |
+|---|---|
+| `POST /conversations` | Cria uma conversa |
+| `GET /conversations` | Lista conversas (com título) |
+| `POST /conversations/{id}/messages` | Envia a mensagem do cliente e devolve a resposta; `?include_tools=true` inclui as ferramentas chamadas |
+| `GET /conversations/{id}` | Histórico em turnos |
+| `DELETE /conversations/{id}` | Apaga a conversa (LGPD) |
+| `GET /handoffs`, `POST /handoffs/{id}/close` | Atendimentos encaminhados para a equipe |
+| `GET /health` | Healthcheck (público) |
+
+```bash
+curl -s -X POST localhost:8710/conversations/minha-conversa/messages \
+  -H 'Content-Type: application/json' -d '{"message": "Quanto custa o Takamine GD20?"}'
+```
+
+Com `EMPORIO_API_KEY` definida, todas as rotas (exceto `/health`) exigem o cabeçalho
+`X-API-Key`. No Compose a porta fica ligada só ao `localhost` e é configurável
+(`EMPORIO_API_PORT`). Falhas do provedor não viram erro HTTP: a resposta traz a mensagem de
+fallback com `"error": true`, para o canal decidir o que fazer.
+
 ## Arquitetura do agente
 
 ```
@@ -433,6 +464,15 @@ conversa, atendendo ao direito de exclusão da LGPD (manual, seção 9).
 cancelamentos e pedidos para falar com uma pessoa são registrados com um resumo para a equipe,
 que não precisa reler a conversa. A equipe acompanha pelo `uv run emporio-handoffs`. Numa loja
 real, esse registro seria trocado por uma integração com o CRM ou o WhatsApp Business.
+
+**Cache de prompt.** O system prompt foi dividido em uma parte **fixa** (persona, regras e dados
+da loja) e uma parte **dinâmica** no final (data e hora, status da loja, avisos do guardrail). A
+parte fixa recebe `cache_control`, e assim ela e as definições das ferramentas, que vêm antes
+dela, podem ser reaproveitadas do cache do provedor (Anthropic e Gemini via OpenRouter) a cada
+mensagem, reduzindo custo e latência. Antes dessa divisão, a data ficava no início do prompt e
+invalidaria o cache em toda mensagem. Pode ser desligado com `LLM_PROMPT_CACHE=false`. A medição
+do ganho real (tokens lidos do cache) ficou pendente: o limite diário de gastos do workspace no
+OpenRouter foi atingido antes dela.
 
 **Robustez:**
 
